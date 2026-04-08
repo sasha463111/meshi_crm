@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowRight, Truck, Download, ZoomIn, Package, Clock, CheckCircle2 } from 'lucide-react'
+import { ArrowRight, Truck, Download, ZoomIn, Package, Clock, CheckCircle2, XCircle } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -22,6 +22,7 @@ const internalStatusLabels: Record<string, string> = {
   packed: 'נארז',
   shipped: 'נשלח',
   delivered: 'נמסר',
+  cancelled: 'בוטל',
 }
 
 const internalStatusColors: Record<string, string> = {
@@ -29,9 +30,11 @@ const internalStatusColors: Record<string, string> = {
   packed: 'bg-blue-100 text-blue-700 border-blue-200',
   shipped: 'bg-purple-100 text-purple-700 border-purple-200',
   delivered: 'bg-green-100 text-green-700 border-green-200',
+  cancelled: 'bg-red-100 text-red-700 border-red-200',
 }
 
 const statusFlow = ['pending', 'packed', 'shipped', 'delivered']
+const allStatuses = ['pending', 'packed', 'shipped', 'delivered', 'cancelled']
 
 export default function SupplierOrderDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params)
@@ -156,12 +159,12 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
               <p className="text-xs text-muted-foreground mt-0.5">עדכן את הסטטוס של כל הפריטים בהזמנה</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {statusFlow.map((status) => (
+              {allStatuses.map((status) => (
                 <Button
                   key={status}
                   size="sm"
                   variant={overallStatus === status ? 'default' : 'outline'}
-                  className={`text-xs h-8 ${overallStatus === status ? '' : 'opacity-70'}`}
+                  className={`text-xs h-8 ${overallStatus === status ? '' : 'opacity-70'} ${status === 'cancelled' ? 'border-red-300 text-red-600 hover:bg-red-50' : ''}`}
                   onClick={() => updateAllStatusMutation.mutate(status)}
                   disabled={updateAllStatusMutation.isPending}
                 >
@@ -169,6 +172,7 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
                   {status === 'packed' && <Package className="size-3 me-1" />}
                   {status === 'shipped' && <Truck className="size-3 me-1" />}
                   {status === 'delivered' && <CheckCircle2 className="size-3 me-1" />}
+                  {status === 'cancelled' && <XCircle className="size-3 me-1" />}
                   {internalStatusLabels[status]}
                 </Button>
               ))}
@@ -330,9 +334,9 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
                     </div>
                   </div>
                   {/* Per-item status update */}
-                  <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/50 border-t">
+                  <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/50 border-t flex-wrap">
                     <span className="text-xs text-muted-foreground me-1">סטטוס:</span>
-                    {statusFlow.map((status) => (
+                    {allStatuses.map((status) => (
                       <button
                         key={status}
                         className={`px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${

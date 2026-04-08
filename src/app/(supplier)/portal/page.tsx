@@ -6,20 +6,20 @@ import { useSupplierAuth } from '@/providers/supplier-auth-provider'
 import { formatCurrency } from '@/lib/utils/currency'
 import { formatDateTime } from '@/lib/utils/dates'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Package, Truck, Clock, CheckCircle2, Filter } from 'lucide-react'
+import { Package, Truck, Clock, CheckCircle2, XCircle } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 
-type StatusFilter = 'all' | 'pending' | 'packed' | 'shipped' | 'delivered'
+type StatusFilter = 'all' | 'pending' | 'packed' | 'shipped' | 'delivered' | 'cancelled'
 
 const internalStatusLabels: Record<string, string> = {
   pending: 'ממתין',
   packed: 'נארז',
   shipped: 'נשלח',
   delivered: 'נמסר',
+  cancelled: 'בוטל',
 }
 
 const internalStatusColors: Record<string, string> = {
@@ -27,6 +27,7 @@ const internalStatusColors: Record<string, string> = {
   packed: 'bg-blue-100 text-blue-700 border-blue-200',
   shipped: 'bg-purple-100 text-purple-700 border-purple-200',
   delivered: 'bg-green-100 text-green-700 border-green-200',
+  cancelled: 'bg-red-100 text-red-700 border-red-200',
 }
 
 export default function SupplierPortalPage() {
@@ -44,7 +45,7 @@ export default function SupplierPortalPage() {
         .select('order_id, fulfillment_status, internal_status')
         .eq('supplier_id', supplier!.supplier_id)
 
-      if (!orderItems?.length) return { orders: [], orderItems: [], counts: { pending: 0, packed: 0, shipped: 0, delivered: 0 } }
+      if (!orderItems?.length) return { orders: [], orderStatusMap: new Map(), orderCounts: { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 } }
 
       const orderIds = [...new Set(orderItems.map(i => i.order_id))]
 
@@ -54,14 +55,6 @@ export default function SupplierPortalPage() {
         .in('id', orderIds)
         .order('order_date', { ascending: false })
 
-      // Count by internal_status
-      const counts = {
-        pending: orderItems.filter(i => !i.internal_status || i.internal_status === 'pending').length,
-        packed: orderItems.filter(i => i.internal_status === 'packed').length,
-        shipped: orderItems.filter(i => i.internal_status === 'shipped').length,
-        delivered: orderItems.filter(i => i.internal_status === 'delivered').length,
-      }
-
       // Map order_id to its item statuses
       const orderStatusMap = new Map<string, string[]>()
       orderItems.forEach(item => {
@@ -70,74 +63,109 @@ export default function SupplierPortalPage() {
         orderStatusMap.set(item.order_id, statuses)
       })
 
-      return { orders: orders || [], orderItems, counts, orderStatusMap }
+      // Count ORDERS (not items) by their resolved status
+      const orderCounts = { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 }
+      const statusPriority = ['cancelled', 'pending', 'packed', 'shipped', 'delivered']
+
+      for (const orderId of orderIds) {
+        const statuses = orderStatusMap.get(orderId) || ['pending']
+        // If any item is cancelled, order is cancelled
+        if (statuses.includes('cancelled')) {
+          orderCounts.cancelled++
+          continue
+        }
+        // Otherwise, use the "worst" (lowest priority) status
+        let worst = 4 // delivered
+        for (const s of statuses) {
+          const idx = statusPriority.indexOf(s)
+          if (idx >= 0 && idx < worst) worst = idx
+        }
+        const resolved = statusPriority[worst] as keyof typeof orderCounts
+        if (resolved in orderCounts) orderCounts[resolved]++
+      }
+
+      return { orders: orders || [], orderStatusMap, orderCounts }
     },
   })
 
-  // Get the "worst" status for an order (pending > packed > shipped > delivered)
+  // Get the resolved status for an order
   const getOrderInternalStatus = (orderId: string): string => {
     const statuses = data?.orderStatusMap?.get(orderId) || ['pending']
+    if (statuses.includes('cancelled')) return 'cancelled'
     const priority = ['pending', 'packed', 'shipped', 'delivered']
     let worst = 3
     for (const s of statuses) {
       const idx = priority.indexOf(s)
-      if (idx < worst) worst = idx
+      if (idx >= 0 && idx < worst) worst = idx
     }
     return priority[worst]
   }
 
   const filteredOrders = data?.orders.filter(order => {
     if (statusFilter === 'all') return true
-    const orderStatus = getOrderInternalStatus(order.id)
-    return orderStatus === statusFilter
+    return getOrderInternalStatus(order.id) === statusFilter
   }) || []
+
+  const counts = data?.orderCounts || { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 }
+  const totalOrders = data?.orders.length || 0
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl sm:text-2xl font-bold">הזמנות</h1>
 
       {/* Summary Cards */}
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
         <Card className={`cursor-pointer transition-all ${statusFilter === 'pending' ? 'ring-2 ring-orange-400' : ''}`} onClick={() => setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending')}>
           <CardContent className="pt-4 flex items-center gap-3">
-            <Clock className="size-7 text-orange-500 shrink-0" />
+            <Clock className="size-6 text-orange-500 shrink-0" />
             <div>
-              <p className="text-xs text-muted-foreground">ממתינים</p>
+              <p className="text-[11px] text-muted-foreground">ממתינים</p>
               {isLoading ? <Skeleton className="h-7 w-10" /> : (
-                <p className="text-2xl font-bold">{data?.counts.pending || 0}</p>
+                <p className="text-2xl font-bold">{counts.pending}</p>
               )}
             </div>
           </CardContent>
         </Card>
         <Card className={`cursor-pointer transition-all ${statusFilter === 'packed' ? 'ring-2 ring-blue-400' : ''}`} onClick={() => setStatusFilter(statusFilter === 'packed' ? 'all' : 'packed')}>
           <CardContent className="pt-4 flex items-center gap-3">
-            <Package className="size-7 text-blue-500 shrink-0" />
+            <Package className="size-6 text-blue-500 shrink-0" />
             <div>
-              <p className="text-xs text-muted-foreground">נארזו</p>
+              <p className="text-[11px] text-muted-foreground">נארזו</p>
               {isLoading ? <Skeleton className="h-7 w-10" /> : (
-                <p className="text-2xl font-bold">{data?.counts.packed || 0}</p>
+                <p className="text-2xl font-bold">{counts.packed}</p>
               )}
             </div>
           </CardContent>
         </Card>
         <Card className={`cursor-pointer transition-all ${statusFilter === 'shipped' ? 'ring-2 ring-purple-400' : ''}`} onClick={() => setStatusFilter(statusFilter === 'shipped' ? 'all' : 'shipped')}>
           <CardContent className="pt-4 flex items-center gap-3">
-            <Truck className="size-7 text-purple-500 shrink-0" />
+            <Truck className="size-6 text-purple-500 shrink-0" />
             <div>
-              <p className="text-xs text-muted-foreground">נשלחו</p>
+              <p className="text-[11px] text-muted-foreground">נשלחו</p>
               {isLoading ? <Skeleton className="h-7 w-10" /> : (
-                <p className="text-2xl font-bold">{data?.counts.shipped || 0}</p>
+                <p className="text-2xl font-bold">{counts.shipped}</p>
               )}
             </div>
           </CardContent>
         </Card>
         <Card className={`cursor-pointer transition-all ${statusFilter === 'delivered' ? 'ring-2 ring-green-400' : ''}`} onClick={() => setStatusFilter(statusFilter === 'delivered' ? 'all' : 'delivered')}>
           <CardContent className="pt-4 flex items-center gap-3">
-            <CheckCircle2 className="size-7 text-green-500 shrink-0" />
+            <CheckCircle2 className="size-6 text-green-500 shrink-0" />
             <div>
-              <p className="text-xs text-muted-foreground">נמסרו</p>
+              <p className="text-[11px] text-muted-foreground">נמסרו</p>
               {isLoading ? <Skeleton className="h-7 w-10" /> : (
-                <p className="text-2xl font-bold">{data?.counts.delivered || 0}</p>
+                <p className="text-2xl font-bold">{counts.delivered}</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className={`cursor-pointer transition-all ${statusFilter === 'cancelled' ? 'ring-2 ring-red-400' : ''}`} onClick={() => setStatusFilter(statusFilter === 'cancelled' ? 'all' : 'cancelled')}>
+          <CardContent className="pt-4 flex items-center gap-3">
+            <XCircle className="size-6 text-red-500 shrink-0" />
+            <div>
+              <p className="text-[11px] text-muted-foreground">בוטלו</p>
+              {isLoading ? <Skeleton className="h-7 w-10" /> : (
+                <p className="text-2xl font-bold">{counts.cancelled}</p>
               )}
             </div>
           </CardContent>
@@ -145,38 +173,21 @@ export default function SupplierPortalPage() {
       </div>
 
       {/* Status filter bar */}
-      <div className="flex items-center gap-1 rounded-lg border p-1 self-start w-fit">
-        <Button
-          size="sm"
-          variant={statusFilter === 'all' ? 'default' : 'ghost'}
-          onClick={() => setStatusFilter('all')}
-          className="text-xs h-7 px-2"
-        >
-          הכל ({data?.orders.length || 0})
+      <div className="flex items-center gap-1 rounded-lg border p-1 self-start w-fit flex-wrap">
+        <Button size="sm" variant={statusFilter === 'all' ? 'default' : 'ghost'} onClick={() => setStatusFilter('all')} className="text-xs h-7 px-2">
+          הכל ({totalOrders})
         </Button>
-        <Button
-          size="sm"
-          variant={statusFilter === 'pending' ? 'default' : 'ghost'}
-          onClick={() => setStatusFilter('pending')}
-          className="text-xs h-7 px-2"
-        >
-          ממתינים ({data?.counts.pending || 0})
+        <Button size="sm" variant={statusFilter === 'pending' ? 'default' : 'ghost'} onClick={() => setStatusFilter('pending')} className="text-xs h-7 px-2">
+          ממתינים ({counts.pending})
         </Button>
-        <Button
-          size="sm"
-          variant={statusFilter === 'packed' ? 'default' : 'ghost'}
-          onClick={() => setStatusFilter('packed')}
-          className="text-xs h-7 px-2"
-        >
-          נארזו ({data?.counts.packed || 0})
+        <Button size="sm" variant={statusFilter === 'packed' ? 'default' : 'ghost'} onClick={() => setStatusFilter('packed')} className="text-xs h-7 px-2">
+          נארזו ({counts.packed})
         </Button>
-        <Button
-          size="sm"
-          variant={statusFilter === 'shipped' ? 'default' : 'ghost'}
-          onClick={() => setStatusFilter('shipped')}
-          className="text-xs h-7 px-2"
-        >
-          נשלחו ({data?.counts.shipped || 0})
+        <Button size="sm" variant={statusFilter === 'shipped' ? 'default' : 'ghost'} onClick={() => setStatusFilter('shipped')} className="text-xs h-7 px-2">
+          נשלחו ({counts.shipped})
+        </Button>
+        <Button size="sm" variant={statusFilter === 'cancelled' ? 'default' : 'ghost'} onClick={() => setStatusFilter('cancelled')} className="text-xs h-7 px-2">
+          בוטלו ({counts.cancelled})
         </Button>
       </div>
 
