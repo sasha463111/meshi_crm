@@ -1,17 +1,39 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Truck, Mail, Phone, Link2, Check, Copy } from 'lucide-react'
+import { Truck, Mail, Phone, Link2, Check, RefreshCw, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 
 export default function SuppliersPage() {
   const supabase = createClient()
+  const queryClient = useQueryClient()
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/sync-orders', { method: 'POST' })
+      if (!res.ok) throw new Error('Sync failed')
+      return res.json()
+    },
+    onSuccess: (data) => {
+      const msg = `סונכרנו ${data.created || 0} חדשות, ${data.updated || 0} עודכנו`
+      setSyncResult(msg)
+      setTimeout(() => setSyncResult(null), 5000)
+      // Refresh any order-related queries
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
+    },
+    onError: () => {
+      setSyncResult('שגיאה בסנכרון')
+      setTimeout(() => setSyncResult(null), 5000)
+    },
+  })
 
   const { data: suppliers, isLoading } = useQuery({
     queryKey: ['suppliers'],
@@ -31,7 +53,27 @@ export default function SuppliersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">ספקים</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">ספקים</h1>
+        <div className="flex items-center gap-3">
+          {syncResult && (
+            <span className="text-sm text-muted-foreground">{syncResult}</span>
+          )}
+          <Button
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            variant="outline"
+            size="sm"
+          >
+            {syncMutation.isPending ? (
+              <Loader2 className="size-4 me-1.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4 me-1.5" />
+            )}
+            סנכרן הזמנות
+          </Button>
+        </div>
+      </div>
 
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2">
