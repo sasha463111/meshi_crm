@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
   const { data: orders } = await supabase
     .from('orders')
-    .select('id, shopify_order_number, order_date, status, fulfillment_status, customer_name, total, shipping_address, tracking_number, carrier')
+    .select('id, shopify_order_number, order_date, status, fulfillment_status, customer_name, customer_email, customer_phone, total, shipping_address, tracking_number, carrier')
     .in('id', orderIds)
     .order('order_date', { ascending: false })
 

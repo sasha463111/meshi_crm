@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronUp, ZoomIn, CheckSquare } from 'lucide-react'
+import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronUp, ZoomIn, CheckSquare, RefreshCw, Loader2, Phone, MapPin, Mail, User } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useState } from 'react'
@@ -47,12 +47,26 @@ interface OrderItem {
   internal_status: string | null
 }
 
+interface ShippingAddress {
+  address1?: string
+  address2?: string
+  city?: string
+  zip?: string
+  province?: string
+  country?: string
+  phone?: string
+  name?: string
+}
+
 interface Order {
   id: string
   shopify_order_number: string
   order_date: string
   status: string
   customer_name: string | null
+  customer_email: string | null
+  customer_phone: string | null
+  shipping_address: ShippingAddress | null
   total: number
 }
 
@@ -63,6 +77,25 @@ export default function SupplierPortalPage() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
+  const [syncResult, setSyncResult] = useState<string | null>(null)
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/sync-orders', { method: 'POST' })
+      if (!res.ok) throw new Error('Sync failed')
+      return res.json()
+    },
+    onSuccess: (data) => {
+      const msg = `סונכרנו ${data.created || 0} חדשות, ${data.updated || 0} עודכנו`
+      setSyncResult(msg)
+      setTimeout(() => setSyncResult(null), 5000)
+      queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
+    },
+    onError: () => {
+      setSyncResult('שגיאה בסנכרון')
+      setTimeout(() => setSyncResult(null), 5000)
+    },
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ['supplier-orders', supplier?.supplier_id],
@@ -178,7 +211,27 @@ export default function SupplierPortalPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl sm:text-2xl font-bold">הזמנות</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl sm:text-2xl font-bold">הזמנות</h1>
+        <div className="flex items-center gap-3">
+          {syncResult && (
+            <span className="text-sm text-muted-foreground">{syncResult}</span>
+          )}
+          <Button
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            variant="outline"
+            size="sm"
+          >
+            {syncMutation.isPending ? (
+              <Loader2 className="size-4 me-1.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4 me-1.5" />
+            )}
+            סנכרן הזמנות
+          </Button>
+        </div>
+      </div>
 
       {/* Summary Cards */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
@@ -300,31 +353,64 @@ export default function SupplierPortalPage() {
 
             return (
               <div key={order.id} className="rounded-lg border overflow-hidden">
-                <div className={`flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors ${selectedOrders.has(order.id) ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}>
-                  <Checkbox
-                    checked={selectedOrders.has(order.id)}
-                    onCheckedChange={() => toggleSelect(order.id)}
-                    className="size-4 shrink-0"
-                  />
-                  <Link href={`/portal/orders/${order.id}`} className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <span className="font-semibold">{order.shopify_order_number}</span>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${internalStatusColors[orderStatus]}`}>
-                          {internalStatusLabels[orderStatus] || orderStatus}
-                        </span>
-                        <span className="text-xs text-muted-foreground">{orderItems.length} פריטים</span>
+                <div className={`p-4 hover:bg-muted/30 transition-colors ${selectedOrders.has(order.id) ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      checked={selectedOrders.has(order.id)}
+                      onCheckedChange={() => toggleSelect(order.id)}
+                      className="size-4 shrink-0 mt-1"
+                    />
+                    <Link href={`/portal/orders/${order.id}`} className="flex-1 min-w-0">
+                      {/* Order header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="font-semibold">{order.shopify_order_number}</span>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${internalStatusColors[orderStatus]}`}>
+                            {internalStatusLabels[orderStatus] || orderStatus}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{orderItems.length} פריטים</span>
+                        </div>
+                        <span className="font-bold">{formatCurrency(Number(order.total))}</span>
                       </div>
-                      <span className="font-bold">{formatCurrency(Number(order.total))}</span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-4 text-sm text-muted-foreground">
-                      <span>{order.customer_name}</span>
-                      <span>{formatDateTime(order.order_date)}</span>
-                    </div>
-                  </Link>
-                  <Button size="icon" variant="ghost" className="size-8 shrink-0" onClick={(e) => toggleExpand(order.id, e)}>
-                    {isExpanded ? <ChevronUp className="size-4" /> : <Eye className="size-4" />}
-                  </Button>
+                      {/* Customer details */}
+                      <div className="mt-2 rounded-md bg-muted/40 p-2.5 space-y-1">
+                        <div className="flex items-center gap-4 flex-wrap text-sm">
+                          {order.customer_name && (
+                            <span className="flex items-center gap-1.5">
+                              <User className="size-3.5 text-muted-foreground shrink-0" />
+                              <span className="font-medium">{order.customer_name}</span>
+                            </span>
+                          )}
+                          {(order.customer_phone || order.shipping_address?.phone) && (
+                            <span className="flex items-center gap-1.5" dir="ltr">
+                              <Phone className="size-3.5 text-muted-foreground shrink-0" />
+                              {order.customer_phone || order.shipping_address?.phone}
+                            </span>
+                          )}
+                          {order.customer_email && (
+                            <span className="flex items-center gap-1.5 text-xs">
+                              <Mail className="size-3.5 text-muted-foreground shrink-0" />
+                              {order.customer_email}
+                            </span>
+                          )}
+                        </div>
+                        {order.shipping_address && (order.shipping_address.address1 || order.shipping_address.city) && (
+                          <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                            <MapPin className="size-3.5 shrink-0 mt-0.5" />
+                            <span>
+                              {[order.shipping_address.address1, order.shipping_address.city, order.shipping_address.zip].filter(Boolean).join(', ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-1.5 text-xs text-muted-foreground">
+                        {formatDateTime(order.order_date)}
+                      </div>
+                    </Link>
+                    <Button size="icon" variant="ghost" className="size-8 shrink-0" onClick={(e) => toggleExpand(order.id, e)}>
+                      {isExpanded ? <ChevronUp className="size-4" /> : <Eye className="size-4" />}
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Quick view */}
