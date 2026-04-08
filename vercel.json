@@ -2,15 +2,15 @@
   "crons": [
     {
       "path": "/api/cron/sync-orders",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 */12 * * *"
     },
     {
       "path": "/api/cron/sync-products",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/sync-campaigns",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/sync-clarity",
