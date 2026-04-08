@@ -146,19 +146,26 @@ export async function syncOrders(sinceDate?: string) {
           created++
         }
 
-        // Sync line items
+        // Sync line items — upsert to preserve supplier_id and internal_status
         const lineItems = (order.lineItems as Record<string, { node: Record<string, unknown> }[]>).edges || []
-        await supabase.from('order_items').delete().eq('order_id', orderId)
 
-        const items = lineItems.map((li: { node: Record<string, unknown> }) => {
+        for (const li of lineItems) {
           const item = li.node
           const unitPrice = (item.originalUnitPriceSet as Record<string, Record<string, string>>).shopMoney
           const totalItemPrice = (item.originalTotalSet as Record<string, Record<string, string>>).shopMoney
           const image = item.image as Record<string, string> | null
+          const shopifyLineItemId = extractIdFromGid(item.id as string)
 
-          return {
+          const { data: existingItem } = await supabase
+            .from('order_items')
+            .select('id')
+            .eq('order_id', orderId)
+            .eq('shopify_line_item_id', shopifyLineItemId)
+            .single()
+
+          const itemData = {
             order_id: orderId,
-            shopify_line_item_id: extractIdFromGid(item.id as string),
+            shopify_line_item_id: shopifyLineItemId,
             title: item.name as string,
             variant_title: item.variantTitle as string | null,
             sku: item.sku as string | null,
@@ -167,10 +174,13 @@ export async function syncOrders(sinceDate?: string) {
             total_price: parseFloat(totalItemPrice.amount),
             image_url: image?.url || null,
           }
-        })
 
-        if (items.length > 0) {
-          await supabase.from('order_items').insert(items)
+          if (existingItem) {
+            // Update only Shopify fields, preserve supplier_id and internal_status
+            await supabase.from('order_items').update(itemData).eq('id', existingItem.id)
+          } else {
+            await supabase.from('order_items').insert(itemData)
+          }
         }
       }
 

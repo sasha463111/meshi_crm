@@ -18,8 +18,9 @@ export async function POST() {
     const result = await syncOrders(since)
     return NextResponse.json({ success: true, ...result })
   } catch (error) {
+    console.error('Manual sync error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Sync failed' },
+      { error: error instanceof Error ? error.message : 'Sync failed', details: String(error) },
       { status: 500 }
     )
   }

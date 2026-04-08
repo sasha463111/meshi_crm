@@ -91,9 +91,9 @@ export default function SupplierPortalPage() {
       setTimeout(() => setSyncResult(null), 5000)
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
     },
-    onError: () => {
-      setSyncResult('שגיאה בסנכרון')
-      setTimeout(() => setSyncResult(null), 5000)
+    onError: async (error) => {
+      setSyncResult(`שגיאה בסנכרון: ${error.message}`)
+      setTimeout(() => setSyncResult(null), 8000)
     },
   })
 
