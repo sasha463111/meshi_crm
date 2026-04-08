@@ -82,8 +82,9 @@ export default function SupplierPortalPage() {
   const syncMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch('/api/sync-orders', { method: 'POST' })
-      if (!res.ok) throw new Error('Sync failed')
-      return res.json()
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || data.details || 'Sync failed')
+      return data
     },
     onSuccess: (data) => {
       const msg = `סונכרנו ${data.created || 0} חדשות, ${data.updated || 0} עודכנו`

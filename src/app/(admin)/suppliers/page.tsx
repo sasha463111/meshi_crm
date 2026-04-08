@@ -18,20 +18,20 @@ export default function SuppliersPage() {
   const syncMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch('/api/sync-orders', { method: 'POST' })
-      if (!res.ok) throw new Error('Sync failed')
-      return res.json()
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || data.details || 'Sync failed')
+      return data
     },
     onSuccess: (data) => {
       const msg = `סונכרנו ${data.created || 0} חדשות, ${data.updated || 0} עודכנו`
       setSyncResult(msg)
       setTimeout(() => setSyncResult(null), 5000)
-      // Refresh any order-related queries
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
     },
-    onError: () => {
-      setSyncResult('שגיאה בסנכרון')
-      setTimeout(() => setSyncResult(null), 5000)
+    onError: (error) => {
+      setSyncResult(`שגיאה: ${error.message}`)
+      setTimeout(() => setSyncResult(null), 8000)
     },
   })
 
