@@ -2,10 +2,8 @@
 
 import { use, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createClient } from '@/lib/supabase/client'
 import { useSupplierAuth } from '@/providers/supplier-auth-provider'
 import { formatCurrency } from '@/lib/utils/currency'
-import { formatDateTime } from '@/lib/utils/dates'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -39,62 +37,73 @@ const allStatuses = ['pending', 'packed', 'shipped', 'delivered', 'cancelled']
 export default function SupplierOrderDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params)
   const { supplier } = useSupplierAuth()
-  const supabase = createClient()
   const queryClient = useQueryClient()
   const [trackingNumber, setTrackingNumber] = useState('')
   const [carrier, setCarrier] = useState('')
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
   const [shipDialogOpen, setShipDialogOpen] = useState(false)
 
-  const { data: order } = useQuery({
+  const { data } = useQuery({
     queryKey: ['supplier-order', id],
+    enabled: !!supplier?.access_token,
     queryFn: async () => {
-      const { data } = await supabase.from('orders').select('*').eq('id', id).single()
-      return data
+      const res = await fetch(`/api/suppliers/orders/${id}`, {
+        headers: { 'x-supplier-token': supplier!.access_token },
+      })
+      if (!res.ok) throw new Error('Failed to fetch order')
+      return res.json() as Promise<{ order: Record<string, unknown>; items: Record<string, unknown>[] }>
     },
   })
 
-  const { data: items } = useQuery({
-    queryKey: ['supplier-order-items', id, supplier?.supplier_id],
-    enabled: !!supplier?.supplier_id,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('order_items')
-        .select('*')
-        .eq('order_id', id)
-        .eq('supplier_id', supplier!.supplier_id)
-      return data || []
-    },
-  })
+  const order = data?.order
+  const items = data?.items as Array<{
+    id: string
+    title: string
+    variant_title?: string
+    sku?: string
+    quantity: number
+    unit_price: number
+    total_price: number
+    image_url?: string
+    internal_status?: string
+  }> | undefined
 
-  // Update internal status for a single item
+  // Update internal status for a single item via API
   const updateItemStatusMutation = useMutation({
     mutationFn: async ({ itemId, status }: { itemId: string; status: string }) => {
-      const { error } = await supabase
-        .from('order_items')
-        .update({ internal_status: status })
-        .eq('id', itemId)
-      if (error) throw error
+      const res = await fetch(`/api/suppliers/orders/${id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-supplier-token': supplier!.access_token,
+        },
+        body: JSON.stringify({ itemIds: [itemId], status }),
+      })
+      if (!res.ok) throw new Error('Failed to update status')
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['supplier-order-items', id] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-order', id] })
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
     },
   })
 
-  // Update all items status at once
+  // Update all items status at once via API
   const updateAllStatusMutation = useMutation({
     mutationFn: async (status: string) => {
       if (!items?.length) return
       const itemIds = items.map(i => i.id)
-      const { error } = await supabase
-        .from('order_items')
-        .update({ internal_status: status })
-        .in('id', itemIds)
-      if (error) throw error
+      const res = await fetch(`/api/suppliers/orders/${id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-supplier-token': supplier!.access_token,
+        },
+        body: JSON.stringify({ itemIds, status }),
+      })
+      if (!res.ok) throw new Error('Failed to update status')
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['supplier-order-items', id] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-order', id] })
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
     },
   })
@@ -117,7 +126,6 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
     onSuccess: () => {
       setShipDialogOpen(false)
       queryClient.invalidateQueries({ queryKey: ['supplier-order', id] })
-      queryClient.invalidateQueries({ queryKey: ['supplier-order-items', id] })
     },
   })
 
@@ -138,13 +146,15 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
   const overallStatus = getOverallStatus()
   const nextStatus = statusFlow[statusFlow.indexOf(overallStatus) + 1] || null
 
+  const shippingAddress = order.shipping_address as Record<string, string> | null
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link href="/portal" className="text-muted-foreground hover:text-foreground">
           <ArrowRight className="size-5" />
         </Link>
-        <h1 className="text-xl sm:text-2xl font-bold">הזמנה {order.shopify_order_number}</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">הזמנה {order.shopify_order_number as string}</h1>
         <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${internalStatusColors[overallStatus]}`}>
           {internalStatusLabels[overallStatus]}
         </span>
@@ -196,12 +206,12 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
         <Card>
           <CardHeader><CardTitle className="text-base">לקוח</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <p className="font-medium">{order.customer_name}</p>
-            {order.shipping_address && (
+            <p className="font-medium">{order.customer_name as string}</p>
+            {shippingAddress && (
               <>
-                <p>{(order.shipping_address as Record<string, string>).address1}</p>
-                <p>{(order.shipping_address as Record<string, string>).city} {(order.shipping_address as Record<string, string>).zip}</p>
-                <p dir="ltr">{(order.shipping_address as Record<string, string>).phone}</p>
+                <p>{shippingAddress.address1}</p>
+                <p>{shippingAddress.city} {shippingAddress.zip}</p>
+                <p dir="ltr">{shippingAddress.phone}</p>
               </>
             )}
           </CardContent>
@@ -213,7 +223,7 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
             <Dialog open={shipDialogOpen} onOpenChange={setShipDialogOpen}>
               <DialogTrigger
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                disabled={order.fulfillment_status === 'FULFILLED'}
+                disabled={(order.fulfillment_status as string) === 'FULFILLED'}
               >
                 <Truck className="size-4" />
                 סמן כנשלח (Shopify)
@@ -294,13 +304,11 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
           <div className="space-y-4">
             {items?.map((item) => {
               const itemStatus = item.internal_status || 'pending'
-              const itemNextStatus = statusFlow[statusFlow.indexOf(itemStatus) + 1] || null
-
               return (
                 <div key={item.id} className="rounded-lg border overflow-hidden">
                   <div className="flex items-start gap-4 p-4">
                     {item.image_url ? (
-                      <div className="relative group cursor-pointer shrink-0" onClick={() => setZoomedImage(item.image_url)}>
+                      <div className="relative group cursor-pointer shrink-0" onClick={() => setZoomedImage(item.image_url!)}>
                         <Image
                           src={item.image_url}
                           alt={item.title}

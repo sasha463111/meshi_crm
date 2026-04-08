@@ -1,7 +1,6 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createClient } from '@/lib/supabase/client'
 import { useSupplierAuth } from '@/providers/supplier-auth-provider'
 import { formatCurrency } from '@/lib/utils/currency'
 import { formatDateTime } from '@/lib/utils/dates'
@@ -10,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronDown, ChevronUp, ZoomIn, CheckSquare } from 'lucide-react'
+import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronUp, ZoomIn, CheckSquare } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useState } from 'react'
@@ -48,9 +47,17 @@ interface OrderItem {
   internal_status: string | null
 }
 
+interface Order {
+  id: string
+  shopify_order_number: string
+  order_date: string
+  status: string
+  customer_name: string | null
+  total: number
+}
+
 export default function SupplierPortalPage() {
   const { supplier } = useSupplierAuth()
-  const supabase = createClient()
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
@@ -59,48 +66,34 @@ export default function SupplierPortalPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['supplier-orders', supplier?.supplier_id],
-    enabled: !!supplier?.supplier_id,
+    enabled: !!supplier?.access_token,
     queryFn: async () => {
-      // Get ALL order items for this supplier (with full details for quick view)
-      const { data: orderItems } = await supabase
-        .from('order_items')
-        .select('id, order_id, title, variant_title, sku, quantity, unit_price, total_price, image_url, internal_status, fulfillment_status')
-        .eq('supplier_id', supplier!.supplier_id)
+      const res = await fetch('/api/suppliers/orders', {
+        headers: { 'x-supplier-token': supplier!.access_token },
+      })
+      if (!res.ok) throw new Error('Failed to fetch orders')
+      const { orders, orderItems } = await res.json() as { orders: Order[]; orderItems: OrderItem[] }
 
-      if (!orderItems?.length) return { orders: [], orderItemsMap: new Map<string, OrderItem[]>(), orderStatusMap: new Map<string, string[]>(), orderCounts: { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 } }
-
-      const orderIds = [...new Set(orderItems.map(i => i.order_id))]
-
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('*')
-        .in('id', orderIds)
-        .order('order_date', { ascending: false })
-
-      // Map order_id to its items (for quick view)
+      // Build maps client-side
       const orderItemsMap = new Map<string, OrderItem[]>()
       const orderStatusMap = new Map<string, string[]>()
-      orderItems.forEach(item => {
-        // Items map
+      orderItems.forEach((item: OrderItem) => {
         const items = orderItemsMap.get(item.order_id) || []
-        items.push(item as OrderItem)
+        items.push(item)
         orderItemsMap.set(item.order_id, items)
-        // Status map
+
         const statuses = orderStatusMap.get(item.order_id) || []
         statuses.push(item.internal_status || 'pending')
         orderStatusMap.set(item.order_id, statuses)
       })
 
-      // Count ORDERS by their resolved status
+      // Count orders by status
       const orderCounts = { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 }
       const statusPriority = ['cancelled', 'pending', 'packed', 'shipped', 'delivered']
 
-      for (const orderId of orderIds) {
-        const statuses = orderStatusMap.get(orderId) || ['pending']
-        if (statuses.includes('cancelled')) {
-          orderCounts.cancelled++
-          continue
-        }
+      for (const order of orders) {
+        const statuses = orderStatusMap.get(order.id) || ['pending']
+        if (statuses.includes('cancelled')) { orderCounts.cancelled++; continue }
         let worst = 4
         for (const s of statuses) {
           const idx = statusPriority.indexOf(s)
@@ -110,14 +103,13 @@ export default function SupplierPortalPage() {
         if (resolved in orderCounts) orderCounts[resolved]++
       }
 
-      return { orders: orders || [], orderItemsMap, orderStatusMap, orderCounts }
+      return { orders, orderItemsMap, orderStatusMap, orderCounts }
     },
   })
 
-  // Bulk status update mutation
+  // Bulk status update via API
   const bulkStatusMutation = useMutation({
     mutationFn: async (status: string) => {
-      // Get all item IDs for selected orders
       const itemIds: string[] = []
       selectedOrders.forEach(orderId => {
         const items = data?.orderItemsMap?.get(orderId)
@@ -125,11 +117,15 @@ export default function SupplierPortalPage() {
       })
       if (!itemIds.length) return
 
-      const { error } = await supabase
-        .from('order_items')
-        .update({ internal_status: status })
-        .in('id', itemIds)
-      if (error) throw error
+      const res = await fetch('/api/suppliers/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-supplier-token': supplier!.access_token,
+        },
+        body: JSON.stringify({ itemIds, status }),
+      })
+      if (!res.ok) throw new Error('Failed to update')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
@@ -149,7 +145,7 @@ export default function SupplierPortalPage() {
     return priority[worst]
   }
 
-  const filteredOrders = data?.orders.filter(order => {
+  const filteredOrders = data?.orders.filter((order: Order) => {
     if (statusFilter === 'all') return true
     return getOrderInternalStatus(order.id) === statusFilter
   }) || []
@@ -170,7 +166,7 @@ export default function SupplierPortalPage() {
     if (selectedOrders.size === filteredOrders.length) {
       setSelectedOrders(new Set())
     } else {
-      setSelectedOrders(new Set(filteredOrders.map(o => o.id)))
+      setSelectedOrders(new Set(filteredOrders.map((o: Order) => o.id)))
     }
   }
 
@@ -235,21 +231,11 @@ export default function SupplierPortalPage() {
 
       {/* Status filter bar */}
       <div className="flex items-center gap-1 rounded-lg border p-1 self-start w-fit flex-wrap">
-        <Button size="sm" variant={statusFilter === 'all' ? 'default' : 'ghost'} onClick={() => setStatusFilter('all')} className="text-xs h-7 px-2">
-          הכל ({totalOrders})
-        </Button>
-        <Button size="sm" variant={statusFilter === 'pending' ? 'default' : 'ghost'} onClick={() => setStatusFilter('pending')} className="text-xs h-7 px-2">
-          ממתינים ({counts.pending})
-        </Button>
-        <Button size="sm" variant={statusFilter === 'packed' ? 'default' : 'ghost'} onClick={() => setStatusFilter('packed')} className="text-xs h-7 px-2">
-          נארזו ({counts.packed})
-        </Button>
-        <Button size="sm" variant={statusFilter === 'shipped' ? 'default' : 'ghost'} onClick={() => setStatusFilter('shipped')} className="text-xs h-7 px-2">
-          נשלחו ({counts.shipped})
-        </Button>
-        <Button size="sm" variant={statusFilter === 'cancelled' ? 'default' : 'ghost'} onClick={() => setStatusFilter('cancelled')} className="text-xs h-7 px-2">
-          בוטלו ({counts.cancelled})
-        </Button>
+        <Button size="sm" variant={statusFilter === 'all' ? 'default' : 'ghost'} onClick={() => setStatusFilter('all')} className="text-xs h-7 px-2">הכל ({totalOrders})</Button>
+        <Button size="sm" variant={statusFilter === 'pending' ? 'default' : 'ghost'} onClick={() => setStatusFilter('pending')} className="text-xs h-7 px-2">ממתינים ({counts.pending})</Button>
+        <Button size="sm" variant={statusFilter === 'packed' ? 'default' : 'ghost'} onClick={() => setStatusFilter('packed')} className="text-xs h-7 px-2">נארזו ({counts.packed})</Button>
+        <Button size="sm" variant={statusFilter === 'shipped' ? 'default' : 'ghost'} onClick={() => setStatusFilter('shipped')} className="text-xs h-7 px-2">נשלחו ({counts.shipped})</Button>
+        <Button size="sm" variant={statusFilter === 'cancelled' ? 'default' : 'ghost'} onClick={() => setStatusFilter('cancelled')} className="text-xs h-7 px-2">בוטלו ({counts.cancelled})</Button>
       </div>
 
       {/* Bulk action bar */}
@@ -278,9 +264,7 @@ export default function SupplierPortalPage() {
                 {internalStatusLabels[status]}
               </Button>
             ))}
-            <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())} className="text-xs h-7 px-2">
-              ביטול
-            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())} className="text-xs h-7 px-2">ביטול</Button>
           </div>
         </div>
       )}
@@ -309,23 +293,19 @@ export default function SupplierPortalPage() {
             <span className="text-xs text-muted-foreground">בחר הכל</span>
           </div>
 
-          {filteredOrders.map((order) => {
+          {filteredOrders.map((order: Order) => {
             const orderStatus = getOrderInternalStatus(order.id)
             const isExpanded = expandedOrder === order.id
             const orderItems = data?.orderItemsMap?.get(order.id) || []
 
             return (
               <div key={order.id} className="rounded-lg border overflow-hidden">
-                {/* Order row */}
                 <div className={`flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors ${selectedOrders.has(order.id) ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}>
-                  {/* Checkbox */}
                   <Checkbox
                     checked={selectedOrders.has(order.id)}
                     onCheckedChange={() => toggleSelect(order.id)}
                     className="size-4 shrink-0"
                   />
-
-                  {/* Order info - clickable to go to detail */}
                   <Link href={`/portal/orders/${order.id}`} className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-wrap">
@@ -342,35 +322,19 @@ export default function SupplierPortalPage() {
                       <span>{formatDateTime(order.order_date)}</span>
                     </div>
                   </Link>
-
-                  {/* Quick view toggle */}
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 shrink-0"
-                    onClick={(e) => toggleExpand(order.id, e)}
-                  >
+                  <Button size="icon" variant="ghost" className="size-8 shrink-0" onClick={(e) => toggleExpand(order.id, e)}>
                     {isExpanded ? <ChevronUp className="size-4" /> : <Eye className="size-4" />}
                   </Button>
                 </div>
 
-                {/* Expanded quick view */}
+                {/* Quick view */}
                 {isExpanded && (
                   <div className="border-t bg-muted/20 p-3 space-y-2">
-                    {orderItems.map(item => (
+                    {orderItems.map((item: OrderItem) => (
                       <div key={item.id} className="flex items-center gap-3 rounded-lg bg-background p-2.5 border">
                         {item.image_url ? (
-                          <div
-                            className="relative group cursor-pointer shrink-0"
-                            onClick={() => setZoomedImage(item.image_url)}
-                          >
-                            <Image
-                              src={item.image_url}
-                              alt={item.title}
-                              width={60}
-                              height={60}
-                              className="size-14 rounded-md object-cover"
-                            />
+                          <div className="relative group cursor-pointer shrink-0" onClick={() => setZoomedImage(item.image_url)}>
+                            <Image src={item.image_url} alt={item.title} width={60} height={60} className="size-14 rounded-md object-cover" />
                             <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity rounded-md flex items-center justify-center">
                               <ZoomIn className="size-4 text-white" />
                             </div>
@@ -399,18 +363,9 @@ export default function SupplierPortalPage() {
         </div>
       )}
 
-      {/* Image Zoom Modal */}
       <Dialog open={!!zoomedImage} onOpenChange={() => setZoomedImage(null)}>
         <DialogContent className="max-w-4xl p-2">
-          {zoomedImage && (
-            <Image
-              src={zoomedImage}
-              alt="Product zoom"
-              width={800}
-              height={800}
-              className="w-full h-auto rounded-lg"
-            />
-          )}
+          {zoomedImage && <Image src={zoomedImage} alt="Product zoom" width={800} height={800} className="w-full h-auto rounded-lg" />}
         </DialogContent>
       </Dialog>
     </div>
