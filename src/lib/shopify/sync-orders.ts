@@ -68,6 +68,17 @@ export async function syncOrders(sinceDate?: string) {
   let hasNext = true
 
   try {
+    // Get default supplier for auto-assignment
+    const { data: defaultSupplier } = await supabase
+      .from('suppliers')
+      .select('id')
+      .eq('is_active', true)
+      .order('created_at')
+      .limit(1)
+      .single()
+
+    const defaultSupplierId = defaultSupplier?.id || null
+
     const query = sinceDate ? `updated_at:>'${sinceDate}'` : undefined
 
     interface ShopifyOrdersResponse {
@@ -179,7 +190,21 @@ export async function syncOrders(sinceDate?: string) {
             // Update only Shopify fields, preserve supplier_id and internal_status
             await supabase.from('order_items').update(itemData).eq('id', existingItem.id)
           } else {
-            await supabase.from('order_items').insert(itemData)
+            // Auto-assign supplier: check product's supplier, fallback to default
+            let supplierId = defaultSupplierId
+            const productGid = (item.product as Record<string, string> | null)?.id
+            if (productGid) {
+              const shopifyProductId = extractIdFromGid(productGid)
+              const { data: product } = await supabase
+                .from('products')
+                .select('supplier_id')
+                .eq('shopify_product_id', shopifyProductId)
+                .not('supplier_id', 'is', null)
+                .limit(1)
+                .single()
+              if (product?.supplier_id) supplierId = product.supplier_id
+            }
+            await supabase.from('order_items').insert({ ...itemData, supplier_id: supplierId })
           }
         }
       }

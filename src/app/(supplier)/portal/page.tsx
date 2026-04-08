@@ -12,7 +12,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronUp, ZoomIn, CheckSquare, RefreshCw, Loader2, Phone, MapPin, Mail, User } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 type StatusFilter = 'all' | 'pending' | 'packed' | 'shipped' | 'delivered' | 'cancelled'
 
@@ -78,6 +78,7 @@ export default function SupplierPortalPage() {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  const autoSyncDone = useRef(false)
 
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -97,6 +98,14 @@ export default function SupplierPortalPage() {
       setTimeout(() => setSyncResult(null), 8000)
     },
   })
+
+  // Auto-sync on portal load
+  useEffect(() => {
+    if (supplier?.access_token && !autoSyncDone.current) {
+      autoSyncDone.current = true
+      syncMutation.mutate()
+    }
+  }, [supplier?.access_token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data, isLoading } = useQuery({
     queryKey: ['supplier-orders', supplier?.supplier_id],
