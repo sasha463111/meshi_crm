@@ -3,16 +3,19 @@ import { syncOrders } from '@/lib/shopify/sync-orders'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 // POST: manual or auto sync trigger
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = createAdminClient()
 
-    // Check if we have orders - if so, incremental sync (last 2 hours)
-    const { count } = await supabase.from('orders').select('id', { count: 'exact', head: true })
-
     let since: string | undefined
-    if (count && count > 0) {
-      since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    const url = new URL(request.url)
+    const full = url.searchParams.get('full')
+
+    if (!full) {
+      const { count } = await supabase.from('orders').select('id', { count: 'exact', head: true })
+      if (count && count > 0) {
+        since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+      }
     }
 
     const result = await syncOrders(since)
