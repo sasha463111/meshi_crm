@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronUp, ZoomIn, CheckSquare, RefreshCw, Loader2, Phone, MapPin, Mail, User } from 'lucide-react'
+import { Package, Truck, Clock, CheckCircle2, XCircle, Eye, ChevronUp, ZoomIn, CheckSquare, RefreshCw, Loader2, Phone, MapPin, Mail, User, Search, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useState, useEffect, useRef } from 'react'
@@ -78,6 +79,7 @@ export default function SupplierPortalPage() {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
   const autoSyncDone = useRef(false)
 
   const syncMutation = useMutation({
@@ -188,9 +190,28 @@ export default function SupplierPortalPage() {
     return priority[worst]
   }
 
+  const normalizePhone = (s: string) => s.replace(/[^\d]/g, '')
+  const searchNormalized = searchQuery.trim().toLowerCase()
+  const searchDigits = normalizePhone(searchQuery)
+
   const filteredOrders = data?.orders.filter((order: Order) => {
-    if (statusFilter === 'all') return true
-    return getOrderInternalStatus(order.id) === statusFilter
+    if (statusFilter !== 'all' && getOrderInternalStatus(order.id) !== statusFilter) return false
+    if (!searchNormalized) return true
+
+    // Match by customer name
+    if (order.customer_name?.toLowerCase().includes(searchNormalized)) return true
+    // Match by email
+    if (order.customer_email?.toLowerCase().includes(searchNormalized)) return true
+    // Match by order number
+    if (order.shopify_order_number?.toLowerCase().includes(searchNormalized)) return true
+    // Match by phone (digits-only comparison)
+    if (searchDigits.length >= 3) {
+      const orderPhones = [order.customer_phone, order.shipping_address?.phone]
+        .filter(Boolean)
+        .map(p => normalizePhone(p as string))
+      if (orderPhones.some(p => p.includes(searchDigits))) return true
+    }
+    return false
   }) || []
 
   const counts = data?.orderCounts || { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 }
@@ -292,6 +313,27 @@ export default function SupplierPortalPage() {
         </Card>
       </div>
 
+      {/* Search bar */}
+      <div className="relative max-w-md">
+        <Search className="absolute start-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+        <Input
+          type="text"
+          placeholder="חפש לפי שם לקוח, טלפון, מייל או מספר הזמנה"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="ps-9 pe-9"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="absolute end-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        )}
+      </div>
+
       {/* Status filter bar */}
       <div className="flex items-center gap-1 rounded-lg border p-1 self-start w-fit flex-wrap">
         <Button size="sm" variant={statusFilter === 'all' ? 'default' : 'ghost'} onClick={() => setStatusFilter('all')} className="text-xs h-7 px-2">הכל ({totalOrders})</Button>
@@ -341,7 +383,7 @@ export default function SupplierPortalPage() {
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             <Package className="mx-auto mb-4 size-12" />
-            <p>{statusFilter === 'all' ? 'אין הזמנות עדיין' : `אין הזמנות בסטטוס "${internalStatusLabels[statusFilter]}"`}</p>
+            <p>{searchQuery ? `לא נמצאו תוצאות עבור "${searchQuery}"` : statusFilter === 'all' ? 'אין הזמנות עדיין' : `אין הזמנות בסטטוס "${internalStatusLabels[statusFilter]}"`}</p>
           </CardContent>
         </Card>
       ) : (
