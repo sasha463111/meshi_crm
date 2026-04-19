@@ -17,7 +17,7 @@ export default function SuppliersPage() {
 
   const syncMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/sync-orders', { method: 'POST' })
+      const res = await fetch('/api/sync-orders?full=true', { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || data.details || 'Sync failed')
       return data

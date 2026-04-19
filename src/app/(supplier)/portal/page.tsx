@@ -82,13 +82,16 @@ export default function SupplierPortalPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const autoSyncDone = useRef(false)
 
+  const doSync = async (full: boolean) => {
+    const url = full ? '/api/sync-orders?full=true' : '/api/sync-orders'
+    const res = await fetch(url, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || data.details || 'Sync failed')
+    return data
+  }
+
   const syncMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/sync-orders', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || data.details || 'Sync failed')
-      return data
-    },
+    mutationFn: () => doSync(true),
     onSuccess: (data) => {
       const msg = `סונכרנו ${data.created || 0} חדשות, ${data.updated || 0} עודכנו`
       setSyncResult(msg)
@@ -101,11 +104,15 @@ export default function SupplierPortalPage() {
     },
   })
 
-  // Auto-sync on portal load
+  // Auto-sync on portal load (incremental - last 2h, fast)
   useEffect(() => {
     if (supplier?.access_token && !autoSyncDone.current) {
       autoSyncDone.current = true
-      syncMutation.mutate()
+      doSync(false).then((data) => {
+        if (data.created > 0) {
+          queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
+        }
+      }).catch(() => {})
     }
   }, [supplier?.access_token]) // eslint-disable-line react-hooks/exhaustive-deps
 
