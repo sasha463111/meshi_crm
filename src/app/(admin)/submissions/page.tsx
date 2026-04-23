@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Textarea } from '@/components/ui/textarea'
 import { formatDateTime } from '@/lib/utils/dates'
 import { formatCurrency } from '@/lib/utils/currency'
-import { CheckCircle2, XCircle, Clock, Package, ZoomIn, Loader2, ExternalLink } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, Package, ZoomIn, Loader2, ExternalLink, Sparkles, Send } from 'lucide-react'
 import Image from 'next/image'
 
 type StatusFilter = 'pending' | 'approved' | 'rejected' | 'all'
@@ -46,6 +46,8 @@ const statusColors: Record<string, string> = {
   rejected: 'bg-red-100 text-red-700 border-red-200',
 }
 
+interface ChatMsg { role: 'user' | 'assistant'; content: string }
+
 export default function AdminSubmissionsPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending')
@@ -53,6 +55,45 @@ export default function AdminSubmissionsPage() {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+  const [chatOpenId, setChatOpenId] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+
+  const openChat = (submissionId: string) => {
+    setChatOpenId(submissionId)
+    setChatMessages([])
+    setChatInput('')
+  }
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || !chatOpenId || chatLoading) return
+    const newMessages: ChatMsg[] = [...chatMessages, { role: 'user', content: chatInput }]
+    setChatMessages(newMessages)
+    setChatInput('')
+    setChatLoading(true)
+    try {
+      const res = await fetch(`/api/submissions/${chatOpenId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newMessages }),
+      })
+      const data = await res.json()
+      if (res.ok && data.reply) {
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: data.reply }])
+      } else {
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: `שגיאה: ${data.error || 'AI לא זמין'}` }])
+      }
+    } catch (err) {
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: `שגיאה: ${(err as Error).message}` }])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  const quickPrompt = (prompt: string) => {
+    setChatInput(prompt)
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-submissions', statusFilter],
@@ -211,29 +252,40 @@ export default function AdminSubmissionsPage() {
 
                 {/* Actions */}
                 {s.status === 'pending' && (
-                  <div className="flex items-center gap-2 pt-2 border-t">
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      disabled={approveMutation.isPending}
-                      onClick={() => approveMutation.mutate(s.id)}
-                    >
-                      {approveMutation.isPending && approveMutation.variables === s.id ? (
-                        <Loader2 className="size-4 me-1 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="size-4 me-1" />
-                      )}
-                      אשר והעלה ל-Shopify
-                    </Button>
+                  <div className="space-y-2 pt-2 border-t">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-red-300 text-red-600 hover:bg-red-50"
-                      onClick={() => setRejectingId(s.id)}
+                      className="w-full border-purple-300 text-purple-700 hover:bg-purple-50"
+                      onClick={() => openChat(s.id)}
                     >
-                      <XCircle className="size-4 me-1" />
-                      דחה
+                      <Sparkles className="size-4 me-1" />
+                      שאל את ה-AI על המוצר
                     </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        disabled={approveMutation.isPending}
+                        onClick={() => approveMutation.mutate(s.id)}
+                      >
+                        {approveMutation.isPending && approveMutation.variables === s.id ? (
+                          <Loader2 className="size-4 me-1 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="size-4 me-1" />
+                        )}
+                        אשר והעלה ל-Shopify
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => setRejectingId(s.id)}
+                      >
+                        <XCircle className="size-4 me-1" />
+                        דחה
+                      </Button>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -248,6 +300,78 @@ export default function AdminSubmissionsPage() {
           {zoomedImage && (
             <Image src={zoomedImage} alt="" width={1200} height={1200} className="w-full h-auto rounded-lg" />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* AI chat dialog */}
+      <Dialog open={!!chatOpenId} onOpenChange={(v) => !v && setChatOpenId(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="size-5 text-purple-600" />
+              AI - ניתוח מוצר
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-3 min-h-[300px] max-h-[50vh] pr-2">
+            {chatMessages.length === 0 && (
+              <div className="text-center text-sm text-muted-foreground py-8">
+                <Sparkles className="size-8 mx-auto mb-2 text-purple-400" />
+                <p>שאל את ה-AI שאלות על המוצר.</p>
+                <p className="text-xs mt-1">ה-AI רואה את התמונות וההערות של הספק.</p>
+                <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                  <Button size="sm" variant="outline" className="text-xs" onClick={() => quickPrompt('תציע לי שם מוצר ותיאור שיווקי בעברית')}>
+                    הצע שם ותיאור
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-xs" onClick={() => quickPrompt('מה המחיר המומלץ למוצר הזה? תסתכל על התמונות')}>
+                    הצע מחיר
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-xs" onClick={() => quickPrompt('תציע תגיות (tags) למוצר בעברית')}>
+                    הצע תגיות
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-xs" onClick={() => quickPrompt('נתח את התמונות — איכות, עיצוב, קהל יעד')}>
+                    ניתוח תמונות
+                  </Button>
+                </div>
+              </div>
+            )}
+            {chatMessages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${
+                  m.role === 'user'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted'
+                }`}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="flex justify-start">
+                <div className="bg-muted rounded-2xl px-4 py-2 text-sm flex items-center gap-2">
+                  <Loader2 className="size-3 animate-spin" />
+                  חושב...
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-end gap-2 border-t pt-3">
+            <Textarea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="כתוב שאלה או הוראה ל-AI..."
+              rows={2}
+              className="resize-none"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendChat()
+                }
+              }}
+            />
+            <Button size="icon" onClick={sendChat} disabled={!chatInput.trim() || chatLoading}>
+              <Send className="size-4" />
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

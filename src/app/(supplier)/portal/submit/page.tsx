@@ -10,26 +10,19 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Upload, X, Loader2, Plus, Image as ImageIcon, CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react'
+import { Upload, X, Loader2, Image as ImageIcon, CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { formatDateTime } from '@/lib/utils/dates'
 
-interface Variant {
-  title: string
-  inventory: number | ''
-}
-
 interface Submission {
   id: string
   title: string
-  description: string | null
-  price: number | null
   status: string
   image_urls: string[]
+  notes: string | null
   rejection_reason: string | null
   created_at: string
-  reviewed_at: string | null
   shopify_product_id: string | null
 }
 
@@ -52,9 +45,7 @@ export default function SubmitProductPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [title, setTitle] = useState('')
-  const [sku, setSku] = useState('')
   const [notes, setNotes] = useState('')
-  const [variants, setVariants] = useState<Variant[]>([{ title: '1.80', inventory: '' }])
   const [images, setImages] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
 
@@ -73,16 +64,8 @@ export default function SubmitProductPage() {
   const submitMutation = useMutation({
     mutationFn: async () => {
       const fd = new FormData()
-      fd.append('title', title)
-      if (sku) fd.append('sku', sku)
+      fd.append('title', title || `מוצר חדש - ${new Date().toLocaleDateString('he-IL')}`)
       if (notes) fd.append('notes', notes)
-      const cleanVariants = variants
-        .filter((v) => v.title.trim())
-        .map((v) => ({
-          title: v.title,
-          inventory: v.inventory === '' ? 0 : Number(v.inventory),
-        }))
-      fd.append('variants', JSON.stringify(cleanVariants))
       images.forEach((img) => fd.append('images', img))
 
       const res = await fetch('/api/suppliers/submissions', {
@@ -96,11 +79,8 @@ export default function SubmitProductPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-submissions'] })
-      // Reset form
       setTitle('')
-      setSku('')
       setNotes('')
-      setVariants([{ title: '1.80', inventory: '' }])
       setImages([])
       setPreviews([])
     },
@@ -114,7 +94,6 @@ export default function SubmitProductPage() {
       reader.onload = () => setPreviews((prev) => [...prev, reader.result as string])
       reader.readAsDataURL(f)
     })
-    // Reset input to allow re-selecting the same file
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -123,21 +102,8 @@ export default function SubmitProductPage() {
     setPreviews((prev) => prev.filter((_, i) => i !== idx))
   }
 
-  const updateVariant = (idx: number, field: keyof Variant, value: string) => {
-    setVariants((prev) =>
-      prev.map((v, i) =>
-        i === idx
-          ? { ...v, [field]: field === 'title' ? value : value === '' ? '' : Number(value) }
-          : v
-      )
-    )
-  }
-
-  const addVariant = () => setVariants((prev) => [...prev, { title: '', inventory: '' }])
-  const removeVariant = (idx: number) => setVariants((prev) => prev.filter((_, i) => i !== idx))
-
   const submissions = submissionsData?.submissions || []
-  const canSubmit = title.trim() && images.length > 0 && !submitMutation.isPending
+  const canSubmit = images.length > 0 && !submitMutation.isPending
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -145,78 +111,22 @@ export default function SubmitProductPage() {
         <Button variant="ghost" size="icon" onClick={() => router.back()}>
           <ArrowRight className="size-5" />
         </Button>
-        <h1 className="text-xl sm:text-2xl font-bold">העלאת מוצר חדש</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">העלאת מוצרים חדשים</h1>
       </div>
 
-      {/* Form */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">פרטי המוצר</CardTitle>
+          <CardTitle className="text-base">העלאה מהירה</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            תעלה את התמונות של המוצרים החדשים. אפשר להוסיף הערות לאדמין (מחירים, גדלים, הסברים).
+            האדמין יעלה את המוצר ל-Shopify עם כל הפרטים.
+          </p>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Images — the main thing */}
           <div>
-            <Label htmlFor="title">שם המוצר *</Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="לדוגמה: Butterfly Dreams - מצעים שחורים"
-              className="mt-1"
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="sku">קוד מוצר (SKU) — אופציונלי</Label>
-            <Input
-              id="sku"
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              placeholder="BD-001"
-              className="mt-1"
-              dir="ltr"
-            />
-          </div>
-
-          {/* Variants */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <Label>גדלים / וריאנטים</Label>
-              <Button type="button" variant="outline" size="sm" onClick={addVariant}>
-                <Plus className="size-3 me-1" />
-                הוסף
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {variants.map((v, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <Input
-                    placeholder="גודל (1.80)"
-                    value={v.title}
-                    onChange={(e) => updateVariant(idx, 'title', e.target.value)}
-                    className="flex-1"
-                  />
-                  <Input
-                    type="number"
-                    placeholder="מלאי"
-                    value={v.inventory}
-                    onChange={(e) => updateVariant(idx, 'inventory', e.target.value)}
-                    className="w-28"
-                    dir="ltr"
-                  />
-                  {variants.length > 1 && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => removeVariant(idx)}>
-                      <X className="size-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Images */}
-          <div>
-            <Label>תמונות *</Label>
-            <div className="mt-2 grid grid-cols-3 sm:grid-cols-4 gap-2">
+            <Label className="text-base">תמונות *</Label>
+            <div className="mt-2 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {previews.map((preview, idx) => (
                 <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border">
                   <Image src={preview} alt="" fill className="object-cover" />
@@ -247,19 +157,33 @@ export default function SubmitProductPage() {
               className="hidden"
             />
             {images.length === 0 && (
-              <p className="text-xs text-muted-foreground mt-2">נדרשת לפחות תמונה אחת</p>
+              <p className="text-xs text-muted-foreground mt-2">אפשר להעלות מספר תמונות בבת אחת</p>
+            )}
+            {images.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-2">{images.length} תמונות נבחרו</p>
             )}
           </div>
 
           <div>
-            <Label htmlFor="notes">הערות (לאדמין)</Label>
+            <Label htmlFor="title">שם המוצר (אופציונלי)</Label>
+            <Input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="לדוגמה: Butterfly Dreams"
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="notes">הערות לאדמין</Label>
             <Textarea
               id="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="הערות נוספות שתרצה שהאדמין יראה"
+              placeholder="כל פרט שחשוב: מחיר מבוקש, גדלים, מלאי, הסבר על המוצר..."
               className="mt-1"
-              rows={2}
+              rows={4}
             />
           </div>
 
@@ -271,7 +195,7 @@ export default function SubmitProductPage() {
 
           {submitMutation.isSuccess && (
             <div className="rounded-lg bg-green-50 border border-green-200 text-green-700 p-3 text-sm">
-              ✓ המוצר נשלח בהצלחה לאישור האדמין
+              ✓ נשלח בהצלחה לאישור האדמין
             </div>
           )}
 
@@ -288,31 +212,26 @@ export default function SubmitProductPage() {
             ) : (
               <>
                 <Upload className="size-4 me-2" />
-                שלח לאישור
+                שלח לאישור ({images.length} תמונות)
               </>
             )}
           </Button>
         </CardContent>
       </Card>
 
-      {/* Submissions history */}
       {submissions.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">הצעות קודמות</CardTitle>
+            <CardTitle className="text-base">העלאות קודמות</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {submissions.map((s) => (
                 <div key={s.id} className="flex items-start gap-3 rounded-lg border p-3">
                   {s.image_urls[0] ? (
-                    <Image
-                      src={s.image_urls[0]}
-                      alt={s.title}
-                      width={60}
-                      height={60}
-                      className="size-14 rounded-md object-cover shrink-0"
-                    />
+                    <div className="relative size-14 rounded-md overflow-hidden shrink-0">
+                      <Image src={s.image_urls[0]} alt={s.title} fill className="object-cover" />
+                    </div>
                   ) : (
                     <div className="size-14 rounded-md bg-muted flex items-center justify-center shrink-0">
                       <ImageIcon className="size-5 text-muted-foreground" />
@@ -335,7 +254,7 @@ export default function SubmitProductPage() {
                   </div>
                   {s.image_urls.length > 1 && (
                     <Badge variant="outline" className="shrink-0">
-                      +{s.image_urls.length - 1} תמונות
+                      +{s.image_urls.length - 1}
                     </Badge>
                   )}
                 </div>
