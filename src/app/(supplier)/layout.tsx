@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Package, LogOut, User } from 'lucide-react'
+import { Package, LogOut, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SupplierAuthProvider, useSupplierAuth } from '@/providers/supplier-auth-provider'
@@ -52,6 +52,14 @@ function SupplierLayoutInner({ children }: { children: React.ReactNode }) {
             >
               <Package className="size-4 me-1" />
               הזמנות
+            </Button>
+            <Button
+              variant={pathname.startsWith('/portal/submit') ? 'secondary' : 'ghost'}
+              size="sm"
+              render={<Link href="/portal/submit" />}
+            >
+              <Upload className="size-4 me-1" />
+              העלה מוצר
             </Button>
             <span className="text-sm text-muted-foreground mx-2">{supplier.supplier_name}</span>
             <Button variant="ghost" size="icon" onClick={signOut}>

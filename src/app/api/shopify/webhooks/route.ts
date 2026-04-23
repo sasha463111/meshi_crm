@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { syncOrders } from '@/lib/shopify/sync-orders'
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
@@ -22,14 +23,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
-  const data = JSON.parse(body)
   const supabase = createAdminClient()
 
   switch (topic) {
     case 'orders/create':
-    case 'orders/updated': {
-      // Trigger order sync for this specific order
-      // For now, log it - the cron will pick it up
+    case 'orders/updated':
+    case 'orders/paid':
+    case 'orders/fulfilled':
+    case 'orders/cancelled': {
+      // Trigger an incremental sync for the last 10 minutes — this will upsert
+      // the specific order (and any other recent ones) without losing supplier_id
+      // or internal_status. Runs in background so webhook returns fast.
+      const since = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      syncOrders(since).catch((err) => console.error('Webhook sync error:', err))
+
       await supabase.from('sync_logs').insert({
         source: `shopify_webhook_${topic}`,
         status: 'completed',
@@ -38,7 +45,8 @@ export async function POST(request: NextRequest) {
       })
       break
     }
-    case 'products/update': {
+    case 'products/update':
+    case 'products/create': {
       await supabase.from('sync_logs').insert({
         source: `shopify_webhook_${topic}`,
         status: 'completed',

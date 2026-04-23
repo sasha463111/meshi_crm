@@ -104,16 +104,26 @@ export default function SupplierPortalPage() {
     },
   })
 
-  // Auto-sync on portal load (incremental - last 2h, fast)
+  // Auto-sync on portal load + every 2 minutes while open (incremental, fast)
   useEffect(() => {
-    if (supplier?.access_token && !autoSyncDone.current) {
-      autoSyncDone.current = true
+    if (!supplier?.access_token) return
+
+    const runSync = () => {
       doSync(false).then((data) => {
-        if (data.created > 0) {
+        if (data.created > 0 || data.updated > 0) {
           queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
         }
       }).catch(() => {})
     }
+
+    if (!autoSyncDone.current) {
+      autoSyncDone.current = true
+      runSync()
+    }
+
+    // Periodic sync every 2 minutes
+    const interval = setInterval(runSync, 2 * 60 * 1000)
+    return () => clearInterval(interval)
   }, [supplier?.access_token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data, isLoading } = useQuery({

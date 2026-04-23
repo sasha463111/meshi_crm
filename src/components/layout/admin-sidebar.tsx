@@ -15,6 +15,7 @@ import {
   Users,
   Settings,
   Lightbulb,
+  Upload,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -44,6 +45,7 @@ const navItems = [
 
 const managementItems = [
   { title: 'ספקים', href: '/suppliers', icon: Truck },
+  { title: 'הצעות מוצרים', href: '/submissions', icon: Upload },
   { title: 'משתמשים', href: '/users', icon: Users },
   { title: 'הגדרות', href: '/settings', icon: Settings },
 ]
