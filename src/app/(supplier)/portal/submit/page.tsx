@@ -18,7 +18,6 @@ import { formatDateTime } from '@/lib/utils/dates'
 interface Variant {
   title: string
   inventory: number | ''
-  price: number | ''
 }
 
 interface Submission {
@@ -53,11 +52,9 @@ export default function SubmitProductPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [price, setPrice] = useState<number | ''>('')
   const [sku, setSku] = useState('')
   const [notes, setNotes] = useState('')
-  const [variants, setVariants] = useState<Variant[]>([{ title: '1.80', inventory: '', price: '' }])
+  const [variants, setVariants] = useState<Variant[]>([{ title: '1.80', inventory: '' }])
   const [images, setImages] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
 
@@ -77,8 +74,6 @@ export default function SubmitProductPage() {
     mutationFn: async () => {
       const fd = new FormData()
       fd.append('title', title)
-      fd.append('description', description)
-      if (price !== '') fd.append('price', String(price))
       if (sku) fd.append('sku', sku)
       if (notes) fd.append('notes', notes)
       const cleanVariants = variants
@@ -86,7 +81,6 @@ export default function SubmitProductPage() {
         .map((v) => ({
           title: v.title,
           inventory: v.inventory === '' ? 0 : Number(v.inventory),
-          price: v.price === '' ? null : Number(v.price),
         }))
       fd.append('variants', JSON.stringify(cleanVariants))
       images.forEach((img) => fd.append('images', img))
@@ -104,11 +98,9 @@ export default function SubmitProductPage() {
       queryClient.invalidateQueries({ queryKey: ['supplier-submissions'] })
       // Reset form
       setTitle('')
-      setDescription('')
-      setPrice('')
       setSku('')
       setNotes('')
-      setVariants([{ title: '1.80', inventory: '', price: '' }])
+      setVariants([{ title: '1.80', inventory: '' }])
       setImages([])
       setPreviews([])
     },
@@ -141,7 +133,7 @@ export default function SubmitProductPage() {
     )
   }
 
-  const addVariant = () => setVariants((prev) => [...prev, { title: '', inventory: '', price: '' }])
+  const addVariant = () => setVariants((prev) => [...prev, { title: '', inventory: '' }])
   const removeVariant = (idx: number) => setVariants((prev) => prev.filter((_, i) => i !== idx))
 
   const submissions = submissionsData?.submissions || []
@@ -174,41 +166,15 @@ export default function SubmitProductPage() {
           </div>
 
           <div>
-            <Label htmlFor="description">תיאור</Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="תיאור של המוצר, חומרים, מידות וכו'"
+            <Label htmlFor="sku">קוד מוצר (SKU) — אופציונלי</Label>
+            <Input
+              id="sku"
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              placeholder="BD-001"
               className="mt-1"
-              rows={3}
+              dir="ltr"
             />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="price">מחיר (₪)</Label>
-              <Input
-                id="price"
-                type="number"
-                value={price}
-                onChange={(e) => setPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                placeholder="790"
-                className="mt-1"
-                dir="ltr"
-              />
-            </div>
-            <div>
-              <Label htmlFor="sku">קוד מוצר (SKU)</Label>
-              <Input
-                id="sku"
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                placeholder="BD-001"
-                className="mt-1"
-                dir="ltr"
-              />
-            </div>
           </div>
 
           {/* Variants */}
@@ -234,15 +200,7 @@ export default function SubmitProductPage() {
                     placeholder="מלאי"
                     value={v.inventory}
                     onChange={(e) => updateVariant(idx, 'inventory', e.target.value)}
-                    className="w-24"
-                    dir="ltr"
-                  />
-                  <Input
-                    type="number"
-                    placeholder="מחיר"
-                    value={v.price}
-                    onChange={(e) => updateVariant(idx, 'price', e.target.value)}
-                    className="w-24"
+                    className="w-28"
                     dir="ltr"
                   />
                   {variants.length > 1 && (
