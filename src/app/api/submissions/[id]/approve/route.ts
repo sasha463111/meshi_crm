@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createShopifyProduct } from '@/lib/shopify/create-product'
+import { createShopifyProduct, type CreateProductInput } from '@/lib/shopify/create-product'
+
+interface ApprovePayload {
+  title?: string
+  description?: string
+  price?: number | null
+  compare_at_price?: number | null
+  sku?: string | null
+  product_type?: string | null
+  category?: string | null
+  vendor?: string | null
+  tags?: string[]
+  variants?: Array<{ title: string; inventory?: number; price?: number | null; sku?: string | null }>
+  image_urls?: string[] // Selected images (subset of submission's images)
+  status?: 'ACTIVE' | 'DRAFT'
+}
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
@@ -24,28 +39,47 @@ export async function POST(
     return NextResponse.json({ error: `Already ${submission.status}` }, { status: 400 })
   }
 
+  // Parse payload — admin may send full listing data; fall back to submission fields
+  let payload: ApprovePayload = {}
   try {
-    // Create product in Shopify
-    const { shopifyProductId } = await createShopifyProduct({
-      title: submission.title,
-      description: submission.description,
-      price: submission.price,
-      sku: submission.sku,
-      variants: submission.variants,
-      imageUrls: submission.image_urls,
-    })
+    payload = await request.json()
+  } catch {
+    // Empty body — use submission fields
+  }
 
-    // Also insert product into our DB linked to supplier
+  try {
+    const input: CreateProductInput = {
+      title: payload.title || submission.title,
+      description: payload.description || submission.description || '',
+      price: payload.price ?? submission.price ?? null,
+      compareAtPrice: payload.compare_at_price ?? null,
+      sku: payload.sku ?? submission.sku ?? null,
+      productType: payload.product_type || null,
+      category: payload.category || null,
+      vendor: payload.vendor || 'משי טקסטיל',
+      tags: payload.tags || [],
+      variants: payload.variants ?? submission.variants ?? [],
+      imageUrls: payload.image_urls ?? submission.image_urls ?? [],
+      status: payload.status || 'ACTIVE',
+    }
+
+    // Create product in Shopify
+    const { shopifyProductId } = await createShopifyProduct(input)
+
+    // Insert product into our DB linked to supplier
     await supabase.from('products').insert({
       shopify_product_id: shopifyProductId,
-      title: submission.title,
-      description: submission.description,
-      price: submission.price,
+      title: input.title,
+      description: input.description,
+      price: input.price,
       cost_price: submission.cost_price,
-      sku: submission.sku,
+      sku: input.sku,
       supplier_id: submission.supplier_id,
-      images: (submission.image_urls || []).map((url: string) => ({ url, alt: submission.title })),
-      status: 'draft',
+      product_type: input.productType,
+      category: input.category,
+      tags: input.tags,
+      images: (input.imageUrls || []).map((url: string) => ({ url, alt: input.title })),
+      status: input.status === 'ACTIVE' ? 'active' : 'draft',
     })
 
     // Mark submission approved

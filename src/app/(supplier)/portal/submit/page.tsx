@@ -6,7 +6,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSupplierAuth } from '@/providers/supplier-auth-provider'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -44,7 +43,6 @@ export default function SubmitProductPage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
   const [images, setImages] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
@@ -64,7 +62,7 @@ export default function SubmitProductPage() {
   const submitMutation = useMutation({
     mutationFn: async () => {
       const fd = new FormData()
-      fd.append('title', title || `מוצר חדש - ${new Date().toLocaleDateString('he-IL')}`)
+      fd.append('title', `מוצר חדש - ${new Date().toLocaleDateString('he-IL')}`)
       if (notes) fd.append('notes', notes)
       images.forEach((img) => fd.append('images', img))
 
@@ -79,7 +77,6 @@ export default function SubmitProductPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-submissions'] })
-      setTitle('')
       setNotes('')
       setImages([])
       setPreviews([])
@@ -162,17 +159,6 @@ export default function SubmitProductPage() {
             {images.length > 0 && (
               <p className="text-xs text-muted-foreground mt-2">{images.length} תמונות נבחרו</p>
             )}
-          </div>
-
-          <div>
-            <Label htmlFor="title">שם המוצר (אופציונלי)</Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="לדוגמה: Butterfly Dreams"
-              className="mt-1"
-            />
           </div>
 
           <div>

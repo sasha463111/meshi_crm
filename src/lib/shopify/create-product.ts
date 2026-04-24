@@ -1,13 +1,18 @@
 import { shopifyGraphQL, extractIdFromGid } from './client'
 
-interface CreateProductInput {
+export interface CreateProductInput {
   title: string
   description?: string
-  price?: number
-  sku?: string
-  variants?: Array<{ title: string; inventory?: number; price?: number; sku?: string }>
-  imageUrls?: string[]
+  price?: number | null
+  compareAtPrice?: number | null
+  sku?: string | null
+  productType?: string | null
+  category?: string | null
+  vendor?: string | null
   tags?: string[]
+  variants?: Array<{ title: string; inventory?: number; price?: number | null; sku?: string | null }>
+  imageUrls?: string[]
+  status?: 'ACTIVE' | 'DRAFT'
 }
 
 const PRODUCT_CREATE_MUTATION = `
@@ -17,6 +22,11 @@ const PRODUCT_CREATE_MUTATION = `
         id
         title
         handle
+        variants(first: 10) {
+          edges {
+            node { id title }
+          }
+        }
       }
       userErrors {
         field
@@ -36,28 +46,54 @@ const PRODUCT_VARIANTS_BULK_CREATE = `
   }
 `
 
+const PRODUCT_VARIANT_UPDATE = `
+  mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      productVariants { id title price sku }
+      userErrors { field message }
+    }
+  }
+`
+
 export async function createShopifyProduct(input: CreateProductInput): Promise<{
   shopifyProductId: string
   handle: string
+  numericId: string
 }> {
-  // Build media (images)
   const media = (input.imageUrls || []).map((url) => ({
     originalSource: url,
     mediaContentType: 'IMAGE' as const,
   }))
 
-  // Create product with first variant's price/sku (Shopify requires at least one variant)
-  const firstVariant = input.variants?.[0]
   const product: Record<string, unknown> = {
     title: input.title,
     descriptionHtml: input.description || '',
-    status: 'DRAFT', // Start as draft - admin can publish later
+    status: input.status || 'ACTIVE',
     tags: input.tags || [],
+  }
+  if (input.productType) product.productType = input.productType
+  if (input.vendor) product.vendor = input.vendor
+  // Category - Shopify uses category taxonomy, but productType + tags also work.
+  // We set productType as the main "category" since existing products use it that way.
+
+  // If variants provided, add productOptions so we can create variants with those option values
+  if (input.variants && input.variants.length > 0) {
+    product.productOptions = [
+      {
+        name: 'גודל',
+        values: input.variants.map((v) => ({ name: v.title })),
+      },
+    ]
   }
 
   const createRes = await shopifyGraphQL<{
     productCreate: {
-      product: { id: string; title: string; handle: string } | null
+      product: {
+        id: string
+        title: string
+        handle: string
+        variants: { edges: Array<{ node: { id: string; title: string } }> }
+      } | null
       userErrors: { field: string[]; message: string }[]
     }
   }>(PRODUCT_CREATE_MUTATION, { product, media: media.length ? media : undefined })
@@ -65,30 +101,70 @@ export async function createShopifyProduct(input: CreateProductInput): Promise<{
   if (createRes.productCreate.userErrors?.length) {
     throw new Error(
       'Shopify product create failed: ' +
-        createRes.productCreate.userErrors.map((e) => e.message).join(', ')
+        createRes.productCreate.userErrors.map((e) => `${e.field?.join('.')}: ${e.message}`).join(', ')
     )
   }
 
   const newProduct = createRes.productCreate.product
   if (!newProduct) throw new Error('Shopify product create returned no product')
 
-  // Create variants if provided
+  // Handle variants — update the auto-created ones (or create more)
   if (input.variants && input.variants.length > 0) {
-    const defaultPrice = firstVariant?.price ?? input.price ?? 0
-    const variantInputs = input.variants.map((v) => ({
-      optionValues: [{ optionName: 'גודל', name: v.title }],
-      price: String(v.price ?? defaultPrice),
-      inventoryItem: { sku: v.sku || input.sku || '' },
-    }))
+    const defaultPrice = input.price ?? 0
+    const createdVariants = newProduct.variants.edges.map((e) => e.node)
 
-    await shopifyGraphQL(PRODUCT_VARIANTS_BULK_CREATE, {
-      productId: newProduct.id,
-      variants: variantInputs,
-    })
+    // Build variant inputs with prices and inventory-related fields
+    const variantInputs = input.variants.map((v, idx) => {
+      const existing = createdVariants[idx]
+      return {
+        id: existing?.id,
+        price: String(v.price ?? defaultPrice),
+        inventoryItem: v.sku ? { sku: v.sku } : {},
+        ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
+      }
+    }).filter((v) => v.id)
+
+    if (variantInputs.length > 0) {
+      await shopifyGraphQL(PRODUCT_VARIANT_UPDATE, {
+        productId: newProduct.id,
+        variants: variantInputs,
+      })
+    }
+
+    // If user provided more variants than Shopify auto-created, create the extras
+    if (input.variants.length > createdVariants.length) {
+      const extras = input.variants.slice(createdVariants.length).map((v) => ({
+        optionValues: [{ optionName: 'גודל', name: v.title }],
+        price: String(v.price ?? defaultPrice),
+        ...(v.sku ? { inventoryItem: { sku: v.sku } } : {}),
+        ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
+      }))
+      await shopifyGraphQL(PRODUCT_VARIANTS_BULK_CREATE, {
+        productId: newProduct.id,
+        variants: extras,
+      })
+    }
+  } else if (input.price) {
+    // No variants — just update the default variant price
+    const defaultVariant = newProduct.variants.edges[0]?.node
+    if (defaultVariant) {
+      await shopifyGraphQL(PRODUCT_VARIANT_UPDATE, {
+        productId: newProduct.id,
+        variants: [
+          {
+            id: defaultVariant.id,
+            price: String(input.price),
+            ...(input.sku ? { inventoryItem: { sku: input.sku } } : {}),
+            ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
+          },
+        ],
+      })
+    }
   }
 
   return {
     shopifyProductId: extractIdFromGid(newProduct.id),
     handle: newProduct.handle,
+    numericId: extractIdFromGid(newProduct.id),
   }
 }
