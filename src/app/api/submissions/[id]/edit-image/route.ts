@@ -1,26 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
 type Action = 'clean_text' | 'clean_background' | 'enhance'
 
 const PROMPTS: Record<Action, string> = {
   clean_text:
-    'Remove all text, watermarks, logos, price tags, and writing from this image. Keep the product and scene exactly as they are, just remove any text or graphic overlays. Preserve the original lighting, colors, and composition.',
+    'Remove all text, watermarks, logos, price tags, writing, and any graphic overlays from this image. Keep the product (bedding, sheets, pillows, etc.) and the scene exactly as they are — do not change the product, composition, lighting, or colors. Only remove text and overlays.',
   clean_background:
-    'Replace the background with a clean, minimalist modern bedroom interior. Keep the bedding product (sheets, pillows, duvet) exactly as shown. Remove any text, watermarks, or foreign objects. Professional product photography style, soft natural lighting.',
+    'Edit this image: keep the bedding product (sheets, pillows, duvet cover) exactly as is, but replace the background with a clean, modern, minimalist bedroom interior — soft neutral walls, warm natural lighting, professional ecommerce product photography style. Remove any text, watermarks, price tags, or foreign objects. The product itself must not change.',
   enhance:
-    'Enhance this product photograph: improve lighting, increase sharpness, boost colors naturally, remove any text or watermarks. Keep the product and composition exactly the same. Professional ecommerce product photo.',
+    'Enhance this product photograph for ecommerce: improve lighting to be bright and clean, increase sharpness and detail, boost colors naturally to be vibrant but realistic, remove any text, watermarks, or price tags. Keep the product and composition exactly the same. Professional studio-quality output.',
 }
+
+const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!REPLICATE_API_TOKEN) {
+  if (!GEMINI_API_KEY) {
     return NextResponse.json(
-      { error: 'REPLICATE_API_TOKEN not configured. Add it to Vercel env vars.' },
+      { error: 'GEMINI_API_KEY not configured' },
       { status: 500 }
     )
   }
@@ -37,7 +39,7 @@ export async function POST(
 
   const supabase = createAdminClient()
 
-  // Verify submission exists and imageUrl belongs to it
+  // Verify submission
   const { data: submission } = await supabase
     .from('product_submissions')
     .select('supplier_id, image_urls')
@@ -50,74 +52,74 @@ export async function POST(
   }
 
   try {
-    // Call Replicate — using flux-kontext-pro (instruction-based image editing)
-    const prediction = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-kontext-pro/predictions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
-        'Content-Type': 'application/json',
-        Prefer: 'wait=60', // Wait up to 60s for completion
-      },
-      body: JSON.stringify({
-        input: {
-          prompt: PROMPTS[action],
-          input_image: imageUrl,
-          output_format: 'jpg',
-          safety_tolerance: 2,
-        },
-      }),
-    })
-
-    if (!prediction.ok) {
-      const err = await prediction.text()
-      console.error('Replicate error:', err)
-      return NextResponse.json({ error: 'Image edit failed', details: err }, { status: 500 })
-    }
-
-    const result = await prediction.json()
-
-    // If still processing, poll until done
-    let finalUrl: string | null = null
-    if (result.status === 'succeeded') {
-      finalUrl = Array.isArray(result.output) ? result.output[0] : result.output
-    } else if (result.status === 'processing' || result.status === 'starting') {
-      // Poll up to 60 more seconds
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 2000))
-        const pollRes = await fetch(result.urls.get, {
-          headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` },
-        })
-        const pollData = await pollRes.json()
-        if (pollData.status === 'succeeded') {
-          finalUrl = Array.isArray(pollData.output) ? pollData.output[0] : pollData.output
-          break
-        }
-        if (pollData.status === 'failed') {
-          return NextResponse.json({ error: 'Replicate prediction failed', details: pollData.error }, { status: 500 })
-        }
-      }
-    } else if (result.status === 'failed') {
-      return NextResponse.json({ error: 'Replicate failed', details: result.error }, { status: 500 })
-    }
-
-    if (!finalUrl) {
-      return NextResponse.json({ error: 'Image edit timed out' }, { status: 504 })
-    }
-
-    // Download the edited image and upload to our storage
-    const imgRes = await fetch(finalUrl)
+    // Download the input image and convert to base64
+    const imgRes = await fetch(imageUrl)
     if (!imgRes.ok) {
-      return NextResponse.json({ error: 'Failed to download edited image' }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to fetch input image' }, { status: 500 })
     }
-    const buffer = Buffer.from(await imgRes.arrayBuffer())
-    const path = `${submission.supplier_id}/edited-${Date.now()}-${action}.jpg`
+    const imgBuffer = Buffer.from(await imgRes.arrayBuffer())
+    const imgBase64 = imgBuffer.toString('base64')
+    const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
+
+    // Call Gemini 2.5 Flash Image for editing
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: PROMPTS[action] },
+                { inline_data: { mime_type: mimeType, data: imgBase64 } },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ['IMAGE'],
+          },
+        }),
+      }
+    )
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text()
+      console.error('Gemini API error:', errText)
+      return NextResponse.json(
+        { error: 'Gemini image edit failed', details: errText },
+        { status: 500 }
+      )
+    }
+
+    const geminiData = await geminiRes.json()
+
+    // Extract image data from response
+    const parts = geminiData.candidates?.[0]?.content?.parts || []
+    const imagePart = parts.find((p: Record<string, unknown>) => p.inline_data || p.inlineData)
+    const inlineData = imagePart?.inline_data || imagePart?.inlineData
+
+    if (!inlineData?.data) {
+      console.error('Gemini returned no image:', JSON.stringify(geminiData).slice(0, 500))
+      return NextResponse.json(
+        { error: 'Gemini did not return an image', response: geminiData },
+        { status: 500 }
+      )
+    }
+
+    // Upload the edited image to Supabase Storage
+    const editedBuffer = Buffer.from(inlineData.data, 'base64')
+    const outMime = inlineData.mime_type || inlineData.mimeType || 'image/png'
+    const ext = outMime.split('/')[1] || 'png'
+    const path = `${submission.supplier_id}/edited-${Date.now()}-${action}.${ext}`
+
     const { error: uploadErr } = await supabase.storage
       .from('product-submissions')
-      .upload(path, buffer, { contentType: 'image/jpeg', upsert: false })
+      .upload(path, editedBuffer, { contentType: outMime, upsert: false })
 
     if (uploadErr) {
       console.error('Upload error:', uploadErr)
-      return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
+      return NextResponse.json({ error: 'Upload failed: ' + uploadErr.message }, { status: 500 })
     }
 
     const { data: urlData } = supabase.storage
@@ -125,7 +127,7 @@ export async function POST(
       .getPublicUrl(path)
     const editedUrl = urlData.publicUrl
 
-    // Add edited URL to submission's image_urls
+    // Add to submission's image_urls
     const updatedUrls = [...(submission.image_urls || []), editedUrl]
     await supabase
       .from('product_submissions')
