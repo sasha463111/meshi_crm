@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowRight, Truck, Download, ZoomIn, Package, Clock, CheckCircle2, XCircle } from 'lucide-react'
+import { ArrowRight, Truck, Download, ZoomIn, Package, Clock, CheckCircle2, XCircle, History } from 'lucide-react'
+import { formatDateTime } from '@/lib/utils/dates'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -42,6 +43,21 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
   const [carrier, setCarrier] = useState('')
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
   const [shipDialogOpen, setShipDialogOpen] = useState(false)
+
+  const { data: historyData } = useQuery({
+    queryKey: ['supplier-order-history', id],
+    enabled: !!supplier?.access_token,
+    queryFn: async () => {
+      const res = await fetch(`/api/suppliers/orders/${id}/history`, {
+        headers: { 'x-supplier-token': supplier!.access_token },
+      })
+      if (!res.ok) return { logs: [], items: [] }
+      return res.json() as Promise<{
+        logs: Array<{ id: string; order_item_id: string; from_status: string | null; to_status: string; created_at: string; source: string }>
+        items: Array<{ id: string; title: string; variant_title: string | null; sku: string | null }>
+      }>
+    },
+  })
 
   const { data } = useQuery({
     queryKey: ['supplier-order', id],
@@ -83,6 +99,7 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-order', id] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-order-history', id] })
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
     },
   })
@@ -104,6 +121,7 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-order', id] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-order-history', id] })
       queryClient.invalidateQueries({ queryKey: ['supplier-orders'] })
     },
   })
@@ -365,6 +383,53 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
           </div>
         </CardContent>
       </Card>
+
+      {/* Status Change History */}
+      {historyData && historyData.logs.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <History className="size-4" />
+              היסטוריית שינויי סטטוס
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {historyData.logs.map((log) => {
+                const item = historyData.items.find((it) => it.id === log.order_item_id)
+                return (
+                  <div key={log.id} className="flex items-start gap-3 rounded-md border bg-muted/20 p-2.5 text-sm">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {log.from_status && (
+                          <>
+                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${internalStatusColors[log.from_status]}`}>
+                              {internalStatusLabels[log.from_status]}
+                            </span>
+                            <span className="text-muted-foreground">→</span>
+                          </>
+                        )}
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${internalStatusColors[log.to_status]}`}>
+                          {internalStatusLabels[log.to_status]}
+                        </span>
+                      </div>
+                      {item && (
+                        <p className="text-xs text-muted-foreground mt-1 truncate">
+                          {item.title}
+                          {item.variant_title && ` · ${item.variant_title}`}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
+                      {formatDateTime(log.created_at)}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Image Zoom Modal */}
       <Dialog open={!!zoomedImage} onOpenChange={() => setZoomedImage(null)}>

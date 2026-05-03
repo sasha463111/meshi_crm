@@ -66,17 +66,19 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient()
 
-  // Verify all items belong to this supplier
+  // Fetch existing items with current status for logging
   const { data: items } = await supabase
     .from('order_items')
-    .select('id')
+    .select('id, order_id, internal_status')
     .in('id', itemIds)
     .eq('supplier_id', supplierId)
 
-  const verifiedIds = items?.map(i => i.id) || []
-  if (!verifiedIds.length) {
+  const verifiedItems = items || []
+  if (!verifiedItems.length) {
     return NextResponse.json({ error: 'No matching items' }, { status: 404 })
   }
+
+  const verifiedIds = verifiedItems.map((i) => i.id)
 
   const { error } = await supabase
     .from('order_items')
@@ -87,5 +89,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Update failed' }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, updated: verifiedIds.length })
+  // Write a log entry for each item whose status actually changed
+  const logs = verifiedItems
+    .filter((i) => (i.internal_status || 'pending') !== status)
+    .map((i) => ({
+      order_item_id: i.id,
+      order_id: i.order_id,
+      from_status: i.internal_status || 'pending',
+      to_status: status,
+      changed_by_supplier_id: supplierId,
+      source: 'supplier' as const,
+    }))
+
+  if (logs.length > 0) {
+    await supabase.from('order_item_status_logs').insert(logs)
+  }
+
+  return NextResponse.json({ success: true, updated: verifiedIds.length, logged: logs.length })
 }

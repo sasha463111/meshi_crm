@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, History } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -50,6 +50,26 @@ export default function OrderDetailPage(props: { params: Promise<{ id: string }>
         .eq('order_id', id)
         .single()
       return data
+    },
+  })
+
+  const { data: historyData } = useQuery({
+    queryKey: ['order-status-history', id],
+    queryFn: async () => {
+      const res = await fetch(`/api/orders/${id}/history`)
+      if (!res.ok) return { logs: [], items: [] }
+      return res.json() as Promise<{
+        logs: Array<{
+          id: string
+          order_item_id: string
+          from_status: string | null
+          to_status: string
+          source: string
+          created_at: string
+          suppliers: { name: string } | null
+        }>
+        items: Array<{ id: string; title: string; variant_title: string | null; suppliers: { name: string } | null }>
+      }>
     },
   })
 
@@ -242,10 +262,74 @@ export default function OrderDetailPage(props: { params: Promise<{ id: string }>
               {order.cancelled_at && <TimelineItem label="בוטל" date={order.cancelled_at} />}
             </CardContent>
           </Card>
+
+          {/* Internal Status Change Logs (per item, by suppliers) */}
+          {historyData && historyData.logs.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <History className="size-4" />
+                  שינויי סטטוס ספקים
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {historyData.logs.map((log) => {
+                    const item = historyData.items.find((it) => it.id === log.order_item_id)
+                    return (
+                      <div key={log.id} className="rounded-md border bg-muted/20 p-2.5 text-sm">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {log.from_status && (
+                            <>
+                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${INTERNAL_STATUS_COLORS[log.from_status]}`}>
+                                {INTERNAL_STATUS_LABELS[log.from_status]}
+                              </span>
+                              <span className="text-muted-foreground text-xs">→</span>
+                            </>
+                          )}
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${INTERNAL_STATUS_COLORS[log.to_status]}`}>
+                            {INTERNAL_STATUS_LABELS[log.to_status]}
+                          </span>
+                          <span className="text-xs text-muted-foreground ms-auto">
+                            {formatDateTime(log.created_at)}
+                          </span>
+                        </div>
+                        {item && (
+                          <p className="text-xs text-muted-foreground mt-1.5 truncate">
+                            {item.title}
+                            {item.variant_title && ` · ${item.variant_title}`}
+                          </p>
+                        )}
+                        {log.suppliers?.name && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">ע&quot;י {log.suppliers.name}</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
   )
+}
+
+const INTERNAL_STATUS_LABELS: Record<string, string> = {
+  pending: 'ממתין',
+  packed: 'נארז',
+  shipped: 'נשלח',
+  delivered: 'נמסר',
+  cancelled: 'בוטל',
+}
+
+const INTERNAL_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-orange-100 text-orange-700 border-orange-200',
+  packed: 'bg-blue-100 text-blue-700 border-blue-200',
+  shipped: 'bg-purple-100 text-purple-700 border-purple-200',
+  delivered: 'bg-green-100 text-green-700 border-green-200',
+  cancelled: 'bg-red-100 text-red-700 border-red-200',
 }
 
 function TimelineItem({ label, date }: { label: string; date: string }) {
