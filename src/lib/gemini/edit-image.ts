@@ -76,18 +76,26 @@ export async function editProductImage(
     return null
   }
 
-  // Normalise to an exact 4:5 frame (1080x1350). For the clean studio shot we
-  // auto-crop the uniform #EAE9E6 margins first so the product fills the frame
-  // (no floating). Then cover-fit so the frame is always completely filled.
+  // Normalise to an exact 4:5 frame (1080x1350) so it always fits the catalog card.
   const rawBuffer = Buffer.from(inlineData.data, 'base64')
-  let sourceForFrame: Buffer = rawBuffer
-  if (action === 'white_background') {
-    sourceForFrame = await autoCropBackground(rawBuffer)
-  }
-  const editedBuffer = await sharp(sourceForFrame)
+  const covered = await sharp(rawBuffer)
     .resize(FRAME_W, FRAME_H, { fit: 'cover', position: 'centre', background: FRAME_BG })
-    .jpeg({ quality: 92 })
     .toBuffer()
+
+  let editedBuffer: Buffer
+  if (action === 'white_background') {
+    // For the studio shot, shrink to 88% and centre on a #EAE9E6 canvas so every
+    // product sits at a uniform distance with an even margin (no floating, no too-close).
+    const inner = await sharp(covered)
+      .resize(Math.round(FRAME_W * 0.88), Math.round(FRAME_H * 0.88), { fit: 'cover', position: 'centre' })
+      .toBuffer()
+    editedBuffer = await sharp({ create: { width: FRAME_W, height: FRAME_H, channels: 3, background: FRAME_BG } })
+      .composite([{ input: inner, gravity: 'centre' }])
+      .jpeg({ quality: 92 })
+      .toBuffer() as Buffer
+  } else {
+    editedBuffer = await sharp(covered).jpeg({ quality: 92 }).toBuffer() as Buffer
+  }
 
   // Upload edited image
   const supabase = createAdminClient()
@@ -99,50 +107,4 @@ export async function editProductImage(
   if (uploadErr) throw new Error('Upload failed: ' + uploadErr.message)
 
   return supabase.storage.from('product-submissions').getPublicUrl(path).data.publicUrl
-}
-
-// Crop away the uniform background margins so the product fills the frame.
-// Uses the top-left pixel as the background reference colour.
-async function autoCropBackground(buffer: Buffer): Promise<Buffer> {
-  try {
-    const img = sharp(buffer)
-    const meta = await img.metadata()
-    const width = meta.width || 0
-    const height = meta.height || 0
-    if (!width || !height) return buffer
-
-    const raw = await sharp(buffer).removeAlpha().raw().toBuffer() as Buffer
-    const ch = 3
-    // background = average of the four corners (more robust than a single pixel)
-    const corners = [[0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1]].map(([x, y]) => {
-      const i = (y * width + x) * ch
-      return [raw[i], raw[i + 1], raw[i + 2]]
-    })
-    const bg = [0, 1, 2].map((k) => Math.round(corners.reduce((a, c) => a + c[k], 0) / 4))
-    const thr = 30
-    let minX = width, minY = height, maxX = 0, maxY = 0
-    for (let y = 0; y < height; y += 2) {
-      for (let x = 0; x < width; x += 2) {
-        const i = (y * width + x) * ch
-        const d = Math.abs(raw[i] - bg[0]) + Math.abs(raw[i + 1] - bg[1]) + Math.abs(raw[i + 2] - bg[2])
-        if (d > thr) {
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-          if (y < minY) minY = y
-          if (y > maxY) maxY = y
-        }
-      }
-    }
-    if (maxX <= minX || maxY <= minY) return buffer // nothing detected
-    const pad = Math.round(Math.max(width, height) * 0.02)
-    minX = Math.max(0, minX - pad)
-    minY = Math.max(0, minY - pad)
-    maxX = Math.min(width, maxX + pad)
-    maxY = Math.min(height, maxY + pad)
-    return await sharp(buffer)
-      .extract({ left: minX, top: minY, width: maxX - minX, height: maxY - minY })
-      .toBuffer() as Buffer
-  } catch {
-    return buffer
-  }
 }
