@@ -133,6 +133,16 @@ export async function createShopifyProduct(input: CreateProductInput): Promise<{
 
   const defaultPrice = input.price ?? 0
 
+  // Safety net: never publish a ₪0 product. If neither the product price nor any
+  // variant price is positive, abort instead of silently creating a free product.
+  const hasVariants = !!(input.variants && input.variants.length > 0)
+  const willBeZero = hasVariants
+    ? !input.variants!.some((v) => Number(v.price ?? defaultPrice) > 0)
+    : defaultPrice <= 0
+  if (willBeZero) {
+    throw new Error('Refusing to create product with price 0 — no valid price provided')
+  }
+
   // Helper: inventory config for each variant (tracked + 100 at location)
   const invConfig = (sku?: string | null) => ({
     inventoryItem: { tracked: true, ...(sku ? { sku } : {}) },

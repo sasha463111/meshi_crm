@@ -86,10 +86,20 @@ export async function POST(
       }
     }
 
+    // Guarantee a valid price — never create a ₪0 product. Bed-sheet sets default
+    // to ₪79 (store strategy) if the listing came through without a price.
+    let resolvedPrice = payload.price ?? submission.price ?? null
+    const isBedSheets = (payload.category || submission.category || '')
+      .toLowerCase()
+      .includes('bed sheet')
+    if ((resolvedPrice == null || resolvedPrice <= 0) && isBedSheets) {
+      resolvedPrice = 79
+    }
+
     const input: CreateProductInput = {
       title: payload.title || submission.title,
       description: payload.description || submission.description || '',
-      price: payload.price ?? submission.price ?? null,
+      price: resolvedPrice,
       compareAtPrice: payload.compare_at_price ?? null,
       sku: payload.sku ?? submission.sku ?? null,
       productType: payload.product_type || null,
