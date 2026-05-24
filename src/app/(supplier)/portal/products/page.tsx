@@ -14,6 +14,23 @@ import { Search, X, Upload, Package, ZoomIn, Loader2, RefreshCw, EyeOff, Eye } f
 import Link from 'next/link'
 import Image from 'next/image'
 
+// Map Shopify product types to Hebrew category labels
+const CATEGORY_MAP: Record<string, string> = {
+  'Bed Sheets': 'מצעים',
+  'Curtains': 'וילונות',
+  'Rugs': 'שטיחים',
+  'Towels': 'מגבות',
+  'Chairs': 'כיסאות',
+  'Sofa Covers': 'כיסויי ספה',
+  'Pillows': 'כריות',
+  'Blankets': 'שמיכות',
+}
+
+function categoryLabel(productType: string | null): string {
+  if (!productType) return 'אחר'
+  return CATEGORY_MAP[productType] || productType
+}
+
 interface Variant {
   title: string
   price: string
@@ -40,7 +57,8 @@ export default function SupplierProductsPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [filter, setFilter] = useState<'available' | 'inactive' | 'all'>('available')
+  const [activeCategory, setActiveCategory] = useState<string>('all')
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const autoSyncDone = useRef(false)
@@ -115,8 +133,15 @@ export default function SupplierProductsPage() {
 
   const products = data?.products || []
   const searchLower = search.trim().toLowerCase()
+
+  // "available" = active AND has stock > 0
+  const isAvailable = (p: Product) => p.status === 'active' && p.total_inventory > 0
+
+  const availableCount = products.filter(isAvailable).length
+  const inactiveCount = products.filter((p) => p.status !== 'active').length
+
   const filtered = products.filter((p) => {
-    if (filter === 'active' && p.status !== 'active') return false
+    if (filter === 'available' && !isAvailable(p)) return false
     if (filter === 'inactive' && p.status === 'active') return false
     if (!searchLower) return true
     return (
@@ -125,8 +150,26 @@ export default function SupplierProductsPage() {
     )
   })
 
-  const activeCount = products.filter((p) => p.status === 'active').length
-  const inactiveCount = products.filter((p) => p.status !== 'active').length
+  // Build category list (from currently filtered set) and group
+  const categoryCounts = new Map<string, number>()
+  for (const p of filtered) {
+    const cat = categoryLabel(p.product_type)
+    categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1)
+  }
+  const categories = Array.from(categoryCounts.entries()).sort((a, b) => b[1] - a[1])
+
+  const visibleProducts = activeCategory === 'all'
+    ? filtered
+    : filtered.filter((p) => categoryLabel(p.product_type) === activeCategory)
+
+  // Group visible products by category for sectioned display
+  const grouped = new Map<string, Product[]>()
+  for (const p of visibleProducts) {
+    const cat = categoryLabel(p.product_type)
+    if (!grouped.has(cat)) grouped.set(cat, [])
+    grouped.get(cat)!.push(p)
+  }
+  const groupedSorted = Array.from(grouped.entries()).sort((a, b) => b[1].length - a[1].length)
 
   return (
     <div className="space-y-4">
@@ -162,17 +205,42 @@ export default function SupplierProductsPage() {
           )}
         </div>
         <div className="flex items-center gap-1 rounded-lg border p-1">
-          <Button size="sm" variant={filter === 'all' ? 'default' : 'ghost'} onClick={() => setFilter('all')} className="text-xs h-7 px-3">
-            הכל ({products.length})
+          <Button size="sm" variant={filter === 'available' ? 'default' : 'ghost'} onClick={() => { setFilter('available'); setActiveCategory('all') }} className="text-xs h-7 px-3">
+            זמינים ({availableCount})
           </Button>
-          <Button size="sm" variant={filter === 'active' ? 'default' : 'ghost'} onClick={() => setFilter('active')} className="text-xs h-7 px-3">
-            באתר ({activeCount})
-          </Button>
-          <Button size="sm" variant={filter === 'inactive' ? 'default' : 'ghost'} onClick={() => setFilter('inactive')} className="text-xs h-7 px-3">
+          <Button size="sm" variant={filter === 'inactive' ? 'default' : 'ghost'} onClick={() => { setFilter('inactive'); setActiveCategory('all') }} className="text-xs h-7 px-3">
             לא פעילים ({inactiveCount})
+          </Button>
+          <Button size="sm" variant={filter === 'all' ? 'default' : 'ghost'} onClick={() => { setFilter('all'); setActiveCategory('all') }} className="text-xs h-7 px-3">
+            הכל ({products.length})
           </Button>
         </div>
       </div>
+
+      {/* Category chips */}
+      {categories.length > 1 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Button
+            size="sm"
+            variant={activeCategory === 'all' ? 'default' : 'outline'}
+            onClick={() => setActiveCategory('all')}
+            className="text-xs h-7 px-3 rounded-full"
+          >
+            הכל ({filtered.length})
+          </Button>
+          {categories.map(([cat, count]) => (
+            <Button
+              key={cat}
+              size="sm"
+              variant={activeCategory === cat ? 'default' : 'outline'}
+              onClick={() => setActiveCategory(cat)}
+              className="text-xs h-7 px-3 rounded-full"
+            >
+              {cat} ({count})
+            </Button>
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -186,81 +254,92 @@ export default function SupplierProductsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((p) => (
-            <div
-              key={p.id}
-              className={`rounded-lg border overflow-hidden flex flex-col ${p.status !== 'active' ? 'border-muted bg-muted/30 opacity-80' : ''}`}
-            >
-              <div className="flex gap-3 p-3">
-                {p.image ? (
-                  <div className="relative size-20 rounded-md overflow-hidden shrink-0 cursor-pointer group" onClick={() => setZoomedImage(p.image)}>
-                    <Image src={p.image} alt={p.title} fill className="object-cover" />
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <ZoomIn className="size-4 text-white" />
+        <div className="space-y-6">
+          {groupedSorted.map(([cat, catProducts]) => (
+            <div key={cat}>
+              <div className="flex items-center gap-2 mb-2">
+                <h2 className="text-base font-bold">{cat}</h2>
+                <span className="text-xs text-muted-foreground">({catProducts.length})</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {catProducts.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`rounded-lg border overflow-hidden flex flex-col ${p.status !== 'active' ? 'border-muted bg-muted/30 opacity-80' : ''}`}
+                  >
+                    <div className="flex gap-3 p-3">
+                      {p.image ? (
+                        <div className="relative size-20 rounded-md overflow-hidden shrink-0 cursor-pointer group" onClick={() => setZoomedImage(p.image)}>
+                          <Image src={p.image} alt={p.title} fill className="object-cover" />
+                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <ZoomIn className="size-4 text-white" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="size-20 rounded-md bg-muted flex items-center justify-center shrink-0">
+                          <Package className="size-6 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm leading-tight line-clamp-2">{p.title}</p>
+                        <p className="text-sm font-bold mt-1">{formatCurrency(Number(p.price))}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-[10px]">
+                            {p.status === 'active' ? 'באתר' : p.status === 'draft' ? 'טיוטה' : p.status}
+                          </Badge>
+                          <span className="text-[11px] text-muted-foreground">מלאי: {p.total_inventory}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Variants / sizes */}
+                    {p.variants.length > 0 && (
+                      <div className="px-3 pb-2">
+                        <div className="flex flex-wrap gap-1">
+                          {p.variants.map((v, i) => (
+                            <span
+                              key={i}
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${v.inventory > 0 ? 'bg-background' : 'bg-muted text-muted-foreground'}`}
+                              title={v.sku || ''}
+                            >
+                              {v.title}
+                              <span className="text-muted-foreground">·</span>
+                              {v.inventory > 0 ? `${v.inventory} במלאי` : 'אזל'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Activate / Deactivate action */}
+                    <div className="mt-auto border-t px-3 py-2">
+                      {p.status === 'active' ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full text-xs h-7 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => statusMutation.mutate({ id: p.id, active: false })}
+                          disabled={togglingId === p.id}
+                        >
+                          {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <EyeOff className="size-3 me-1" />}
+                          הורד מהאתר
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full text-xs h-7 text-green-600 hover:bg-green-50 hover:text-green-700"
+                          onClick={() => statusMutation.mutate({ id: p.id, active: true })}
+                          disabled={togglingId === p.id}
+                        >
+                          {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <Eye className="size-3 me-1" />}
+                          החזר לאתר
+                        </Button>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <div className="size-20 rounded-md bg-muted flex items-center justify-center shrink-0">
-                    <Package className="size-6 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm leading-tight line-clamp-2">{p.title}</p>
-                  <p className="text-sm font-bold mt-1">{formatCurrency(Number(p.price))}</p>
-                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                    <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-[10px]">
-                      {p.status === 'active' ? 'באתר' : p.status === 'draft' ? 'טיוטה' : p.status}
-                    </Badge>
-                    <span className="text-[11px] text-muted-foreground">מלאי: {p.total_inventory}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Variants / sizes */}
-              {p.variants.length > 0 && (
-                <div className="px-3 pb-2">
-                  <div className="flex flex-wrap gap-1">
-                    {p.variants.map((v, i) => (
-                      <span
-                        key={i}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${v.inventory > 0 ? 'bg-background' : 'bg-muted text-muted-foreground'}`}
-                        title={v.sku || ''}
-                      >
-                        {v.title}
-                        <span className="text-muted-foreground">·</span>
-                        {v.inventory > 0 ? `${v.inventory} במלאי` : 'אזל'}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Activate / Deactivate action */}
-              <div className="mt-auto border-t px-3 py-2">
-                {p.status === 'active' ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="w-full text-xs h-7 text-red-600 hover:bg-red-50 hover:text-red-700"
-                    onClick={() => statusMutation.mutate({ id: p.id, active: false })}
-                    disabled={togglingId === p.id}
-                  >
-                    {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <EyeOff className="size-3 me-1" />}
-                    הורד מהאתר
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="w-full text-xs h-7 text-green-600 hover:bg-green-50 hover:text-green-700"
-                    onClick={() => statusMutation.mutate({ id: p.id, active: true })}
-                    disabled={togglingId === p.id}
-                  >
-                    {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <Eye className="size-3 me-1" />}
-                    החזר לאתר
-                  </Button>
-                )}
+                ))}
               </div>
             </div>
           ))}
