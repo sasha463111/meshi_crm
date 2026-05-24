@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { RevenueChart } from '@/components/dashboard/revenue-chart'
+import { WhatsAppConnectionBanner } from '@/components/whatsapp/connection-banner'
 import { DateRangePicker, type DateRange } from '@/components/dashboard/date-range-picker'
 import { useState } from 'react'
 import { subDays, startOfDay } from 'date-fns'
@@ -90,6 +91,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <WhatsAppConnectionBanner />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">דשבורד</h1>
         <DateRangePicker value={dateRange} onChange={setDateRange} />
