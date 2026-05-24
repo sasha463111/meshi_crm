@@ -3,10 +3,11 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Package, LogOut, Upload, ShoppingBag } from 'lucide-react'
+import { Package, LogOut, Upload, ShoppingBag, MessageCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SupplierAuthProvider, useSupplierAuth } from '@/providers/supplier-auth-provider'
+import { WhatsAppNavDot } from '@/components/whatsapp/connection-banner'
 
 function SupplierLayoutInner({ children }: { children: React.ReactNode }) {
   const { supplier, loading, signOut } = useSupplierAuth()
@@ -68,6 +69,15 @@ function SupplierLayoutInner({ children }: { children: React.ReactNode }) {
             >
               <Upload className="size-4 me-1" />
               העלה מוצר
+            </Button>
+            <Button
+              variant={pathname.startsWith('/portal/whatsapp') ? 'secondary' : 'ghost'}
+              size="sm"
+              render={<Link href="/portal/whatsapp" />}
+            >
+              <MessageCircle className="size-4 me-1" />
+              וואטסאפ
+              <WhatsAppNavDot />
             </Button>
             <span className="text-sm text-muted-foreground mx-2">{supplier.supplier_name}</span>
             <Button variant="ghost" size="icon" onClick={signOut}>
