@@ -9,8 +9,9 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   MessageCircle, Send, Phone, ArrowRight, Search, RefreshCw,
-  User, Plus, Paperclip, FileText, Image as ImageIcon
+  User, Plus, Paperclip, FileText, Image as ImageIcon, Zap
 } from 'lucide-react'
+import Link from 'next/link'
 import { useState, useEffect, useRef } from 'react'
 import { WhatsAppStatusBar } from '@/components/whatsapp/connection-banner'
 
@@ -350,6 +351,10 @@ export default function WhatsAppPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-[#075E54]">WhatsApp</h1>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="text-xs" render={<Link href="/whatsapp/automation" />}>
+            <Zap className="size-4 me-1" />
+            אוטומציה
+          </Button>
           <Button
             size="sm"
             variant="outline"
