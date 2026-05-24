@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Play, ArrowRight, AlertTriangle, FlaskConical } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
+import { Loader2, Play, ArrowRight, AlertTriangle, FlaskConical, MessageSquareText, Save } from 'lucide-react'
 import Link from 'next/link'
 
 interface SettingsResponse {
@@ -72,6 +73,37 @@ export default function WhatsAppAutomationPage() {
       )
       qc.invalidateQueries({ queryKey: ['wflow-settings'] })
     },
+  })
+
+  // Message templates (editable copy)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const templatesQ = useQuery({
+    queryKey: ['wflow-templates'],
+    queryFn: async () =>
+      (await fetch('/api/whatsapp/flow/templates')).json() as Promise<{
+        templates: Array<{ id: string; flow: string; step: number; label: string; content: string }>
+      }>,
+  })
+  useEffect(() => {
+    if (templatesQ.data?.templates) {
+      const init: Record<string, string> = {}
+      templatesQ.data.templates.forEach((t) => (init[t.id] = t.content))
+      setDrafts(init)
+    }
+  }, [templatesQ.data])
+
+  const saveTemplates = useMutation({
+    mutationFn: async () => {
+      const templates = Object.entries(drafts).map(([id, content]) => ({ id, content }))
+      const res = await fetch('/api/whatsapp/flow/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templates }),
+      })
+      if (!res.ok) throw new Error('save failed')
+      return res.json()
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['wflow-templates'] }),
   })
 
   const enabled = !!data?.enabled
@@ -167,6 +199,48 @@ export default function WhatsAppAutomationPage() {
             </Button>
           </div>
           {runResult && <p className="text-sm text-muted-foreground">{runResult}</p>}
+        </CardContent>
+      </Card>
+
+      {/* Message templates */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <MessageSquareText className="size-4" />
+            נוסחי ההודעות
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            ניתן לערוך את הטקסטים. השתמש ב-<code className="bg-muted px-1 rounded">{'{name}'}</code> לשם הלקוח/ה
+            וב-<code className="bg-muted px-1 rounded">{'{link}'}</code> לקישור השחזור.
+          </p>
+          {templatesQ.isLoading ? (
+            <Loader2 className="size-5 animate-spin" />
+          ) : (
+            (templatesQ.data?.templates || []).map((t) => (
+              <div key={t.id} className="space-y-1.5">
+                <Label className="text-sm">{t.label}</Label>
+                <Textarea
+                  dir="rtl"
+                  rows={4}
+                  value={drafts[t.id] ?? t.content}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [t.id]: e.target.value }))}
+                />
+              </div>
+            ))
+          )}
+          <Button onClick={() => saveTemplates.mutate()} disabled={saveTemplates.isPending}>
+            {saveTemplates.isPending ? (
+              <Loader2 className="size-4 me-1 animate-spin" />
+            ) : (
+              <Save className="size-4 me-1" />
+            )}
+            שמור נוסחים
+          </Button>
+          {saveTemplates.isSuccess && (
+            <span className="text-xs text-green-600 ms-2">נשמר ✓</span>
+          )}
         </CardContent>
       </Card>
 
