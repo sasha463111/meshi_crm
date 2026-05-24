@@ -9,9 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
-import { Search, X, Upload, Trash2, RotateCcw, Package, ZoomIn, Loader2, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Search, X, Upload, Package, ZoomIn, Loader2, RefreshCw, EyeOff, Eye } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -41,10 +40,9 @@ export default function SupplierProductsPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
-  const [removalTarget, setRemovalTarget] = useState<Product | null>(null)
-  const [removalReason, setRemovalReason] = useState('')
-  const [filter, setFilter] = useState<'all' | 'flagged'>('all')
+  const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
   const autoSyncDone = useRef(false)
 
   const { data, isLoading } = useQuery({
@@ -92,27 +90,34 @@ export default function SupplierProductsPage() {
     }
   }, [supplier?.access_token]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const removalMutation = useMutation({
-    mutationFn: async ({ id, requested, reason }: { id: string; requested: boolean; reason?: string }) => {
-      const res = await fetch(`/api/suppliers/products/${id}/removal`, {
+  const statusMutation = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      setTogglingId(id)
+      const res = await fetch(`/api/suppliers/products/${id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-supplier-token': supplier!.access_token },
-        body: JSON.stringify({ requested, reason }),
+        body: JSON.stringify({ active }),
       })
-      if (!res.ok) throw new Error('Failed')
-      return res.json()
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Failed')
+      return d
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-products'] })
-      setRemovalTarget(null)
-      setRemovalReason('')
+      setTogglingId(null)
+    },
+    onError: (e) => {
+      setSyncResult(`שגיאה: ${(e as Error).message}`)
+      setTimeout(() => setSyncResult(null), 6000)
+      setTogglingId(null)
     },
   })
 
   const products = data?.products || []
   const searchLower = search.trim().toLowerCase()
   const filtered = products.filter((p) => {
-    if (filter === 'flagged' && !p.removal_requested) return false
+    if (filter === 'active' && p.status !== 'active') return false
+    if (filter === 'inactive' && p.status === 'active') return false
     if (!searchLower) return true
     return (
       p.title.toLowerCase().includes(searchLower) ||
@@ -120,7 +125,8 @@ export default function SupplierProductsPage() {
     )
   })
 
-  const flaggedCount = products.filter((p) => p.removal_requested).length
+  const activeCount = products.filter((p) => p.status === 'active').length
+  const inactiveCount = products.filter((p) => p.status !== 'active').length
 
   return (
     <div className="space-y-4">
@@ -159,8 +165,11 @@ export default function SupplierProductsPage() {
           <Button size="sm" variant={filter === 'all' ? 'default' : 'ghost'} onClick={() => setFilter('all')} className="text-xs h-7 px-3">
             הכל ({products.length})
           </Button>
-          <Button size="sm" variant={filter === 'flagged' ? 'default' : 'ghost'} onClick={() => setFilter('flagged')} className="text-xs h-7 px-3">
-            סומנו להסרה ({flaggedCount})
+          <Button size="sm" variant={filter === 'active' ? 'default' : 'ghost'} onClick={() => setFilter('active')} className="text-xs h-7 px-3">
+            באתר ({activeCount})
+          </Button>
+          <Button size="sm" variant={filter === 'inactive' ? 'default' : 'ghost'} onClick={() => setFilter('inactive')} className="text-xs h-7 px-3">
+            לא פעילים ({inactiveCount})
           </Button>
         </div>
       </div>
@@ -173,7 +182,7 @@ export default function SupplierProductsPage() {
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             <Package className="mx-auto mb-4 size-12" />
-            <p>{search ? `לא נמצאו תוצאות עבור "${search}"` : filter === 'flagged' ? 'אין מוצרים שסומנו להסרה' : 'אין מוצרים'}</p>
+            <p>{search ? `לא נמצאו תוצאות עבור "${search}"` : filter === 'inactive' ? 'אין מוצרים לא פעילים' : 'אין מוצרים'}</p>
           </CardContent>
         </Card>
       ) : (
@@ -181,7 +190,7 @@ export default function SupplierProductsPage() {
           {filtered.map((p) => (
             <div
               key={p.id}
-              className={`rounded-lg border overflow-hidden flex flex-col ${p.removal_requested ? 'border-red-300 bg-red-50/40' : ''}`}
+              className={`rounded-lg border overflow-hidden flex flex-col ${p.status !== 'active' ? 'border-muted bg-muted/30 opacity-80' : ''}`}
             >
               <div className="flex gap-3 p-3">
                 {p.image ? (
@@ -227,34 +236,29 @@ export default function SupplierProductsPage() {
                 </div>
               )}
 
-              {/* Removal action */}
+              {/* Activate / Deactivate action */}
               <div className="mt-auto border-t px-3 py-2">
-                {p.removal_requested ? (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-red-600 flex items-center gap-1">
-                      <AlertTriangle className="size-3" />
-                      סומן להסרה
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs h-7"
-                      onClick={() => removalMutation.mutate({ id: p.id, requested: false })}
-                      disabled={removalMutation.isPending}
-                    >
-                      <RotateCcw className="size-3 me-1" />
-                      בטל
-                    </Button>
-                  </div>
-                ) : (
+                {p.status === 'active' ? (
                   <Button
                     size="sm"
                     variant="ghost"
                     className="w-full text-xs h-7 text-red-600 hover:bg-red-50 hover:text-red-700"
-                    onClick={() => { setRemovalTarget(p); setRemovalReason('') }}
+                    onClick={() => statusMutation.mutate({ id: p.id, active: false })}
+                    disabled={togglingId === p.id}
                   >
-                    <Trash2 className="size-3 me-1" />
-                    סמן להסרה מהאתר
+                    {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <EyeOff className="size-3 me-1" />}
+                    הורד מהאתר
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full text-xs h-7 text-green-600 hover:bg-green-50 hover:text-green-700"
+                    onClick={() => statusMutation.mutate({ id: p.id, active: true })}
+                    disabled={togglingId === p.id}
+                  >
+                    {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <Eye className="size-3 me-1" />}
+                    החזר לאתר
                   </Button>
                 )}
               </div>
@@ -262,40 +266,6 @@ export default function SupplierProductsPage() {
           ))}
         </div>
       )}
-
-      {/* Removal reason dialog */}
-      <Dialog open={!!removalTarget} onOpenChange={(v) => !v && setRemovalTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>סימון מוצר להסרה</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              המוצר &quot;{removalTarget?.title}&quot; יסומן להסרה. האדמין יקבל התראה ויסיר אותו מהאתר.
-            </p>
-            <Textarea
-              value={removalReason}
-              onChange={(e) => setRemovalReason(e.target.value)}
-              placeholder="סיבה (אופציונלי) — למשל: אזל מהמלאי, הופסק..."
-              rows={3}
-            />
-            <div className="flex items-center gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setRemovalTarget(null)}>
-                ביטול
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                disabled={removalMutation.isPending}
-                onClick={() => removalTarget && removalMutation.mutate({ id: removalTarget.id, requested: true, reason: removalReason })}
-              >
-                {removalMutation.isPending && <Loader2 className="size-4 me-1 animate-spin" />}
-                סמן להסרה
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Image zoom */}
       <Dialog open={!!zoomedImage} onOpenChange={() => setZoomedImage(null)}>
