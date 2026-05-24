@@ -32,6 +32,34 @@ export function normalizeIlPhone(raw: string | null | undefined): string | null 
   return d
 }
 
+/** Hour (0-23) and weekday short name in Israel time. */
+function israelNow(d = new Date()): { hour: number; weekday: string } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jerusalem',
+    hour: '2-digit',
+    hourCycle: 'h23',
+    weekday: 'short',
+  }).formatToParts(d)
+  const hour = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10)
+  const weekday = parts.find((p) => p.type === 'weekday')?.value || ''
+  return { hour, weekday }
+}
+
+/**
+ * Business-hours gate (Israel time):
+ *  - never on Saturday (Shabbat)
+ *  - abandoned-cart step 1 is exempt from the hour window (always ~30 min after)
+ *  - everything else only sends 07:00–21:00; outside that it waits in the queue
+ *    and goes out at the start of the next active day.
+ */
+function canSendNow(flow: string, step: number, d = new Date()): boolean {
+  const { hour, weekday } = israelNow(d)
+  if (weekday === 'Sat') return false
+  const exemptFromHours = flow === 'abandoned_cart' && step === 1
+  if (exemptFromHours) return true
+  return hour >= 7 && hour < 21
+}
+
 async function getSetting(key: string): Promise<string | null> {
   const supabase = createAdminClient()
   const { data } = await supabase.from('app_settings').select('value').eq('key', key).single()
@@ -104,6 +132,7 @@ export interface ProcessResult {
   due: number
   sent: number
   failed: number
+  skipped: number
 }
 
 /**
@@ -124,12 +153,18 @@ export async function processDueJobs(limit = 50): Promise<ProcessResult> {
     .limit(limit)
 
   const jobs = due ?? []
-  const result: ProcessResult = { enabled, testPhone, due: jobs.length, sent: 0, failed: 0 }
+  const result: ProcessResult = { enabled, testPhone, due: jobs.length, sent: 0, failed: 0, skipped: 0 }
 
   // Safety: if the master switch is off, do nothing (leave jobs pending).
   if (!enabled) return result
 
   for (const job of jobs) {
+    // Business-hours gate: skip (leave pending) if outside the allowed window —
+    // it will be sent on a later tick once we're back in hours / next active day.
+    if (!canSendNow(job.flow, job.step)) {
+      result.skipped++
+      continue
+    }
     const target = testPhone || job.phone
     try {
       const msgId = await sendVia(target, job.content)
