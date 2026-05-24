@@ -517,7 +517,18 @@ export default function AdminSubmissionsPage() {
                           )}
                         </div>
                         {!isProcessing && (
-                          <div className="mt-1 grid grid-cols-3 gap-1">
+                          <div className="mt-1 grid grid-cols-2 gap-1">
+                            <button
+                              title="רקע לבן נקי בסגנון קטלוג"
+                              onClick={() => {
+                                setEditingImageAction({ url, action: 'white_background' })
+                                editImageMutation.mutate({ submissionId: reviewSubmission.id, imageUrl: url, action: 'white_background' })
+                              }}
+                              className="rounded border-2 border-primary/40 bg-primary/5 hover:bg-primary/10 px-1 py-1 text-[9px] font-semibold flex flex-col items-center gap-0.5"
+                            >
+                              <ImageIcon className="size-3" />
+                              רקע לבן
+                            </button>
                             <button
                               title="נקה טקסטים, עלונים ואביזרים — משאיר רק את המוצר"
                               onClick={() => {
@@ -530,7 +541,7 @@ export default function AdminSubmissionsPage() {
                               נקה הכל
                             </button>
                             <button
-                              title="רקע מקצועי"
+                              title="רקע חדר שינה מקצועי"
                               onClick={() => {
                                 setEditingImageAction({ url, action: 'clean_background' })
                                 editImageMutation.mutate({ submissionId: reviewSubmission.id, imageUrl: url, action: 'clean_background' })
@@ -538,7 +549,7 @@ export default function AdminSubmissionsPage() {
                               className="rounded border bg-background hover:bg-muted px-1 py-1 text-[9px] font-medium flex flex-col items-center gap-0.5"
                             >
                               <ImageIcon className="size-3" />
-                              רקע
+                              רקע חדר
                             </button>
                             <button
                               title="שיפור איכות"

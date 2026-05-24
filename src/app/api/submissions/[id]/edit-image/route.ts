@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
-type Action = 'clean_text' | 'clean_background' | 'enhance'
+type Action = 'clean_text' | 'clean_background' | 'enhance' | 'white_background'
 
 const PROMPTS: Record<Action, string> = {
   clean_text:
@@ -12,6 +12,8 @@ const PROMPTS: Record<Action, string> = {
     'Generate an edited version of this image: keep the bedding product (sheets, pillows, duvet) exactly as is, but place it in a clean, modern, minimalist bedroom interior with soft neutral walls and warm natural lighting, professional ecommerce product photography. Remove any text, watermarks, brochures or foreign objects. Output the edited image.',
   enhance:
     'Edit this product photo: enhance the lighting to be bright and clean, increase sharpness and detail, boost colors naturally, and remove any text, watermarks, brochures or price tags. Keep the bedding product the same. Professional studio-quality ecommerce photo. Output the edited image.',
+  white_background:
+    'Place this bedding set (duvet, sheets and pillows) on a pure solid white studio background, like a professional ecommerce catalog product photo. Remove the room, furniture, floor, walls and all text. Neatly arrange the bedding so it is clearly visible, centered, with soft studio lighting and a subtle shadow. Pure white (#FFFFFF) background. Output the edited image.',
 }
 
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
