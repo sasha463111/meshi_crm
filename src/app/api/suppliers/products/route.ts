@@ -21,6 +21,7 @@ interface ShopifyVariant {
   sku: string | null
   inventoryQuantity: number
   compareAtPrice: string | null
+  availableForSale?: boolean
 }
 
 function variantNumericId(gid: string): string {
@@ -43,9 +44,10 @@ export async function GET(request: NextRequest) {
   const result = (products || []).map((p) => {
     const sd = p.shopify_data as Record<string, unknown> | null
     const productType = (sd?.productType as string) || p.category || null
+    const publishedAt = (sd?.publishedAt as string) || null
     const variantsRaw = (sd?.variants as { edges?: Array<{ node: ShopifyVariant }> } | undefined)?.edges || []
-    const variants = variantsRaw
-      .map((e) => e.node)
+    const allNodes = variantsRaw.map((e) => e.node)
+    const variants = allNodes
       .filter((v) => v.title !== 'Default Title')
       .map((v) => ({
         id: variantNumericId(v.id),
@@ -53,7 +55,12 @@ export async function GET(request: NextRequest) {
         price: v.price,
         sku: v.sku,
         inventory: v.inventoryQuantity ?? 0,
+        available_for_sale: v.availableForSale ?? false,
       }))
+
+    // A product is purchasable on the site if any variant is availableForSale
+    // (covers "continue selling when out of stock" + untracked inventory)
+    const availableForSale = allNodes.some((v) => v.availableForSale)
 
     const images = (p.images as Array<{ url: string }> | null) || []
 
@@ -63,6 +70,8 @@ export async function GET(request: NextRequest) {
       title: p.title,
       price: p.price,
       status: p.status,
+      published: !!publishedAt,
+      available_for_sale: availableForSale,
       image: images[0]?.url || null,
       total_inventory: variants.length
         ? variants.reduce((sum, v) => sum + (v.inventory || 0), 0)

@@ -12,6 +12,7 @@ const PRODUCTS_QUERY = `
           status
           tags
           productType
+          publishedAt
           images(first: 10) { edges { node { url altText } } }
           variants(first: 10) {
             edges {
@@ -23,6 +24,7 @@ const PRODUCTS_QUERY = `
                 price
                 compareAtPrice
                 inventoryQuantity
+                availableForSale
               }
             }
           }
@@ -48,6 +50,7 @@ export async function syncProducts() {
   let updated = 0
   let after: string | null = null
   let hasNext = true
+  const seenProductIds = new Set<string>()
 
   try {
     interface ShopifyProductsResponse {
@@ -65,6 +68,7 @@ export async function syncProducts() {
         processed++
 
         const shopifyProductId = extractIdFromGid(product.id as string)
+        seenProductIds.add(shopifyProductId)
         const variants = ((product.variants as Record<string, { node: Record<string, unknown> }[]>).edges || [])
         const images = ((product.images as Record<string, { node: Record<string, string> }[]>).edges || [])
           .map((e: { node: Record<string, string> }) => ({
@@ -118,6 +122,27 @@ export async function syncProducts() {
       hasNext = data.products.pageInfo.hasNextPage
     }
 
+    // Shopify's products query excludes ARCHIVED products. Any product in our DB
+    // that wasn't returned (and isn't already archived) has been archived/deleted
+    // in Shopify — mark it archived so it stops showing as available.
+    let archived = 0
+    if (seenProductIds.size > 0) {
+      const { data: dbProducts } = await supabase
+        .from('products')
+        .select('id, shopify_product_id, status')
+        .neq('status', 'archived')
+
+      const staleIds = (dbProducts || [])
+        .filter((p) => !seenProductIds.has(p.shopify_product_id))
+        .map((p) => p.id)
+
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const batch = staleIds.slice(i, i + 100)
+        await supabase.from('products').update({ status: 'archived' }).in('id', batch)
+        archived += batch.length
+      }
+    }
+
     await supabase.from('sync_logs').update({
       status: 'completed',
       records_processed: processed,
@@ -126,7 +151,7 @@ export async function syncProducts() {
       completed_at: new Date().toISOString(),
     }).eq('id', log!.id)
 
-    return { processed, created, updated }
+    return { processed, created, updated, archived }
   } catch (error) {
     await supabase.from('sync_logs').update({
       status: 'failed',

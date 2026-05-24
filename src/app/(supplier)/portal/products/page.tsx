@@ -46,6 +46,8 @@ interface Product {
   title: string
   price: number
   status: string
+  published: boolean
+  available_for_sale: boolean
   image: string | null
   total_inventory: number
   variants: Variant[]
@@ -165,8 +167,9 @@ export default function SupplierProductsPage() {
   const products = data?.products || []
   const searchLower = search.trim().toLowerCase()
 
-  // "available" = active AND has stock > 0 AND has at least one real size variant
-  const isAvailable = (p: Product) => p.status === 'active' && p.total_inventory > 0 && p.variants.length > 0
+  // "available" = active, published to store, has real sizes, and purchasable
+  const isAvailable = (p: Product) =>
+    p.status === 'active' && p.published && p.variants.length > 0 && p.available_for_sale
 
   const availableCount = products.filter(isAvailable).length
   const inactiveCount = products.filter((p) => p.status !== 'active').length
