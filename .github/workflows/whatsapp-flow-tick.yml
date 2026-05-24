@@ -1,0 +1,20 @@
+name: WhatsApp Flow Tick
+
+# Heartbeat for the WhatsApp automation engine. Calls the flow tick endpoint
+# every 5 minutes so abandoned-cart reminders are scanned and sent on schedule.
+# (Vercel Hobby crons only run daily, hence an external scheduler.)
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call flow tick
+        run: |
+          curl -fsS -m 90 -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://one-stop-shop-theta.vercel.app/api/whatsapp/flow/tick"
