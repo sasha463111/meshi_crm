@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { scanAndEnqueueAbandonedCarts } from '@/lib/whatsapp/abandoned-cart'
+import { scanAndEnqueueOrderUpdates } from '@/lib/whatsapp/order-update'
 import { processDueJobs } from '@/lib/whatsapp/flow'
 
 export const dynamic = 'force-dynamic'
@@ -13,8 +14,9 @@ export const maxDuration = 60
 export async function POST() {
   try {
     const scan = await scanAndEnqueueAbandonedCarts().catch((e) => ({ error: (e as Error).message }))
+    const orders = await scanAndEnqueueOrderUpdates().catch((e) => ({ error: (e as Error).message }))
     const process = await processDueJobs()
-    return NextResponse.json({ ok: true, scan, process })
+    return NextResponse.json({ ok: true, scan, orders, process })
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'run failed' },
