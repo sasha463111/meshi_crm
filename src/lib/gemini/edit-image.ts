@@ -1,7 +1,14 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import sharp from 'sharp'
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
+
+// Catalog frame is 4:5 portrait. Normalise every output to exactly 1080x1350
+// (fit: cover) so it always fills the frame — no white bars ever.
+const FRAME_W = 1080
+const FRAME_H = 1350
+const FRAME_BG = '#EAE9E6'
 
 export type ImageEditAction = 'clean_text' | 'clean_background' | 'enhance' | 'white_background'
 
@@ -50,6 +57,7 @@ export async function editProductImage(
             ],
           },
         ],
+        generationConfig: { imageConfig: { aspectRatio: '4:5' } },
       }),
     }
   )
@@ -68,16 +76,21 @@ export async function editProductImage(
     return null
   }
 
+  // Normalise to an exact 4:5 frame (1080x1350) so it always fills the card —
+  // any padding uses #EAE9E6 so no white ever appears.
+  const rawBuffer = Buffer.from(inlineData.data, 'base64')
+  const editedBuffer = await sharp(rawBuffer)
+    .resize(FRAME_W, FRAME_H, { fit: 'cover', position: 'centre', background: FRAME_BG })
+    .jpeg({ quality: 92 })
+    .toBuffer()
+
   // Upload edited image
   const supabase = createAdminClient()
-  const outMime = inlineData.mime_type || inlineData.mimeType || 'image/png'
-  const ext = outMime.split('/')[1] || 'png'
-  const path = `${supplierId}/edited-${Date.now()}-${action}-${Math.random().toString(36).slice(2, 6)}.${ext}`
-  const editedBuffer = Buffer.from(inlineData.data, 'base64')
+  const path = `${supplierId}/edited-${Date.now()}-${action}-${Math.random().toString(36).slice(2, 6)}.jpg`
 
   const { error: uploadErr } = await supabase.storage
     .from('product-submissions')
-    .upload(path, editedBuffer, { contentType: outMime, upsert: false })
+    .upload(path, editedBuffer, { contentType: 'image/jpeg', upsert: false })
   if (uploadErr) throw new Error('Upload failed: ' + uploadErr.message)
 
   return supabase.storage.from('product-submissions').getPublicUrl(path).data.publicUrl
