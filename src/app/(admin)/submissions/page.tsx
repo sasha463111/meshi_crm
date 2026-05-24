@@ -110,6 +110,7 @@ export default function AdminSubmissionsPage() {
   const [generating, setGenerating] = useState(false)
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set())
   const [publishActive, setPublishActive] = useState(true)
+  const [autoImages, setAutoImages] = useState(true)
   const [editingImageAction, setEditingImageAction] = useState<{ url: string; action: string } | null>(null)
 
   const { data, isLoading } = useQuery({
@@ -246,6 +247,7 @@ export default function AdminSubmissionsPage() {
         variants: listing.variants,
         image_urls: Array.from(selectedImages),
         status: publishActive ? 'ACTIVE' : 'DRAFT',
+        auto_images: autoImages,
       },
     })
   }
@@ -706,6 +708,20 @@ export default function AdminSubmissionsPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Auto-images toggle */}
+              <div className="flex items-center justify-between rounded-lg border p-3 bg-primary/5">
+                <div>
+                  <Label htmlFor="rv-auto" className="text-base flex items-center gap-1.5">
+                    <Sparkles className="size-4 text-primary" />
+                    צור אוטומטית רקע קרם + רקע חדר
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    בעת האישור ה-AI ייצר 2 גרסאות מהתמונה הראשונה (רקע #F4F3EF + רקע חדר) ויוסיף אותן למוצר
+                  </p>
+                </div>
+                <Switch id="rv-auto" checked={autoImages} onCheckedChange={setAutoImages} />
               </div>
 
               {/* Status toggle */}

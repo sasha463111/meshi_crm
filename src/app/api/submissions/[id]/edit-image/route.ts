@@ -1,47 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { editProductImage, type ImageEditAction } from '@/lib/gemini/edit-image'
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+export const maxDuration = 60
 
-type Action = 'clean_text' | 'clean_background' | 'enhance' | 'white_background'
-
-const PROMPTS: Record<Action, string> = {
-  clean_text:
-    'Remove ALL text, words, logos, price tags, brochures, magazines, booklets, lookbooks and printed papers from this image. Remove every object on the floor and the bed that is not the bedding set itself. Keep ONLY the bed with its sheets, duvet and pillows in a clean modern bedroom. Professional ecommerce product photo, no text anywhere. Output the edited image.',
-  clean_background:
-    'Generate an edited version of this image: keep the bedding product (sheets, pillows, duvet) exactly as is, but place it in a clean, modern, minimalist bedroom interior with soft neutral walls and warm natural lighting, professional ecommerce product photography. Remove any text, watermarks, brochures or foreign objects. Output the edited image.',
-  enhance:
-    'Edit this product photo: enhance the lighting to be bright and clean, increase sharpness and detail, boost colors naturally, and remove any text, watermarks, brochures or price tags. Keep the bedding product the same. Professional studio-quality ecommerce photo. Output the edited image.',
-  white_background:
-    'Place this bedding set (duvet, sheets and pillows) on a pure solid white studio background, like a professional ecommerce catalog product photo. Remove the room, furniture, floor, walls and all text. Neatly arrange the bedding so it is clearly visible, centered, with soft studio lighting and a subtle shadow. Pure white (#FFFFFF) background. Output the edited image.',
+async function verifySupplier() {
+  // Admin endpoint (no supplier token needed); kept simple.
+  return true
 }
-
-const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!GEMINI_API_KEY) {
-    return NextResponse.json(
-      { error: 'GEMINI_API_KEY not configured' },
-      { status: 500 }
-    )
-  }
-
+  void verifySupplier
   const { id } = await params
   const { imageUrl, action } = (await request.json()) as {
     imageUrl: string
-    action: Action
+    action: ImageEditAction
   }
 
-  if (!imageUrl || !PROMPTS[action]) {
+  const validActions: ImageEditAction[] = ['clean_text', 'clean_background', 'enhance', 'white_background']
+  if (!imageUrl || !validActions.includes(action)) {
     return NextResponse.json({ error: 'imageUrl and valid action required' }, { status: 400 })
   }
 
   const supabase = createAdminClient()
-
-  // Verify submission
   const { data: submission } = await supabase
     .from('product_submissions')
     .select('supplier_id, image_urls')
@@ -54,85 +38,16 @@ export async function POST(
   }
 
   try {
-    // Download the input image and convert to base64
-    const imgRes = await fetch(imageUrl)
-    if (!imgRes.ok) {
-      return NextResponse.json({ error: 'Failed to fetch input image' }, { status: 500 })
-    }
-    const imgBuffer = Buffer.from(await imgRes.arrayBuffer())
-    const imgBase64 = imgBuffer.toString('base64')
-    const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
-
-    // Call Gemini 2.5 Flash Image for editing
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: PROMPTS[action] },
-                { inline_data: { mime_type: mimeType, data: imgBase64 } },
-              ],
-            },
-          ],
-        }),
-      }
-    )
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text()
-      console.error('Gemini API error:', errText)
+    const editedUrl = await editProductImage(imageUrl, action, submission.supplier_id)
+    if (!editedUrl) {
       return NextResponse.json(
-        { error: 'Gemini image edit failed', details: errText },
+        { error: 'המודל לא יצר תמונה. נסה שוב או פעולה אחרת.' },
         { status: 500 }
       )
     }
 
-    const geminiData = await geminiRes.json()
-
-    // Extract image data from response
-    const parts = geminiData.candidates?.[0]?.content?.parts || []
-    const imagePart = parts.find((p: Record<string, unknown>) => p.inline_data || p.inlineData)
-    const inlineData = imagePart?.inline_data || imagePart?.inlineData
-
-    if (!inlineData?.data) {
-      const reason = geminiData.candidates?.[0]?.finishReason
-      console.error('Gemini returned no image:', JSON.stringify(geminiData).slice(0, 500))
-      return NextResponse.json(
-        { error: `המודל לא יצר תמונה (${reason || 'NO_IMAGE'}). נסה שוב או פעולה אחרת.` },
-        { status: 500 }
-      )
-    }
-
-    // Upload the edited image to Supabase Storage
-    const editedBuffer = Buffer.from(inlineData.data, 'base64')
-    const outMime = inlineData.mime_type || inlineData.mimeType || 'image/png'
-    const ext = outMime.split('/')[1] || 'png'
-    const path = `${submission.supplier_id}/edited-${Date.now()}-${action}.${ext}`
-
-    const { error: uploadErr } = await supabase.storage
-      .from('product-submissions')
-      .upload(path, editedBuffer, { contentType: outMime, upsert: false })
-
-    if (uploadErr) {
-      console.error('Upload error:', uploadErr)
-      return NextResponse.json({ error: 'Upload failed: ' + uploadErr.message }, { status: 500 })
-    }
-
-    const { data: urlData } = supabase.storage
-      .from('product-submissions')
-      .getPublicUrl(path)
-    const editedUrl = urlData.publicUrl
-
-    // Add to submission's image_urls
     const updatedUrls = [...(submission.image_urls || []), editedUrl]
-    await supabase
-      .from('product_submissions')
-      .update({ image_urls: updatedUrls })
-      .eq('id', id)
+    await supabase.from('product_submissions').update({ image_urls: updatedUrls }).eq('id', id)
 
     return NextResponse.json({ success: true, editedUrl })
   } catch (error) {

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createShopifyProduct, type CreateProductInput } from '@/lib/shopify/create-product'
+import { editProductImage } from '@/lib/gemini/edit-image'
+
+// Auto image generation (2 Gemini calls) + Shopify create can take ~30s
+export const maxDuration = 60
 
 interface ApprovePayload {
   title?: string
@@ -15,6 +19,7 @@ interface ApprovePayload {
   variants?: Array<{ title: string; inventory?: number; price?: number | null; sku?: string | null }>
   image_urls?: string[] // Selected images (subset of submission's images)
   status?: 'ACTIVE' | 'DRAFT'
+  auto_images?: boolean // default true: auto-generate cream + room bg from first image
 }
 
 export async function POST(
@@ -48,6 +53,37 @@ export async function POST(
   }
 
   try {
+    const selectedImages = payload.image_urls ?? submission.image_urls ?? []
+
+    // Auto-generate cream(#F4F3EF) + room background versions from the first image,
+    // and put them first (the cream studio shot becomes the main product image).
+    let finalImages = [...selectedImages]
+    const autoImages = payload.auto_images !== false
+    if (autoImages && selectedImages.length > 0) {
+      const sourceImage = selectedImages[0]
+      const generated: string[] = []
+      try {
+        const cream = await editProductImage(sourceImage, 'white_background', submission.supplier_id)
+        if (cream) generated.push(cream)
+      } catch (e) {
+        console.error('Auto cream-bg failed:', e)
+      }
+      try {
+        const room = await editProductImage(sourceImage, 'clean_background', submission.supplier_id)
+        if (room) generated.push(room)
+      } catch (e) {
+        console.error('Auto room-bg failed:', e)
+      }
+      if (generated.length > 0) {
+        // Persist the new images onto the submission too
+        await supabase
+          .from('product_submissions')
+          .update({ image_urls: [...(submission.image_urls || []), ...generated] })
+          .eq('id', id)
+        finalImages = [...generated, ...selectedImages]
+      }
+    }
+
     const input: CreateProductInput = {
       title: payload.title || submission.title,
       description: payload.description || submission.description || '',
@@ -59,7 +95,7 @@ export async function POST(
       vendor: payload.vendor || 'משי טקסטיל',
       tags: payload.tags || [],
       variants: payload.variants ?? submission.variants ?? [],
-      imageUrls: payload.image_urls ?? submission.image_urls ?? [],
+      imageUrls: finalImages,
       status: payload.status || 'ACTIVE',
     }
 
