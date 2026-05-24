@@ -20,7 +20,7 @@ export const IMAGE_EDIT_PROMPTS: Record<ImageEditAction, string> = {
   enhance:
     'Edit this product photo: enhance the lighting to be bright and clean, increase sharpness and detail, boost colors naturally, and remove any text, watermarks, brochures or price tags. Keep the bedding product the same. Professional studio-quality ecommerce photo. Output the edited image.',
   white_background:
-    'Place this exact bedding set (duvet, sheets and pillows) on a solid background of color #EAE9E6 (soft warm light grey-beige), like a high-end professional ecommerce catalog product photo. Remove the room, furniture, floor, walls and all text. Keep the bedding product PIXEL-PERFECT identical — do not alter its pattern, print, texture, fabric weave, colors or shape in any way. Preserve and enhance the fabric detail and sharpness so it looks crisp and high resolution. Neatly arrange the bedding centered, with soft even studio lighting and a subtle natural shadow. The entire background must be the solid color #EAE9E6. Highest possible image quality, no blur, no artifacts. Output the edited image.',
+    'Professional ecommerce catalog photo of this exact bedding set on a solid #EAE9E6 (soft warm light grey-beige) background. CLOSE-UP framing: the bedding (duvet and pillows) must FILL THE FRAME from edge to edge, extending close to all four sides with only a thin even margin. Center it. Do NOT show large empty background space, do NOT show a bed frame or legs, do NOT make it float in the middle. Just the styled bedding filling the frame. Keep the product PIXEL-PERFECT identical — same pattern, print, texture, colors and shape. Crisp high detail, soft even studio lighting. The background must be solid #EAE9E6. Output the edited image.',
 }
 
 /**
