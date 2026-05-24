@@ -7,12 +7,31 @@ import { useSupplierAuth } from '@/providers/supplier-auth-provider'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Upload, X, Loader2, Image as ImageIcon, CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Upload, X, Loader2, Image as ImageIcon, CheckCircle2, XCircle, Clock, ArrowRight, Plus } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { formatDateTime } from '@/lib/utils/dates'
+
+// Hebrew category -> Shopify product type
+const CATEGORIES: { label: string; value: string }[] = [
+  { label: 'מצעים', value: 'Bed Sheets' },
+  { label: 'וילונות', value: 'Curtains' },
+  { label: 'שטיחים', value: 'Rugs' },
+  { label: 'מגבות', value: 'Towels' },
+  { label: 'כיסאות', value: 'Chairs' },
+  { label: 'כיסויי ספה', value: 'Sofa Covers' },
+  { label: 'כריות', value: 'Pillows' },
+  { label: 'שמיכות', value: 'Blankets' },
+]
+
+interface SizeRow {
+  title: string
+  inventory: number | ''
+}
 
 interface Submission {
   id: string
@@ -44,6 +63,8 @@ export default function SubmitProductPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [notes, setNotes] = useState('')
+  const [category, setCategory] = useState<string>('Bed Sheets')
+  const [sizes, setSizes] = useState<SizeRow[]>([{ title: '180x200', inventory: '' }])
   const [images, setImages] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
 
@@ -64,6 +85,11 @@ export default function SubmitProductPage() {
       const fd = new FormData()
       fd.append('title', `מוצר חדש - ${new Date().toLocaleDateString('he-IL')}`)
       if (notes) fd.append('notes', notes)
+      fd.append('category', category)
+      const cleanSizes = sizes
+        .filter((s) => s.title.trim())
+        .map((s) => ({ title: s.title.trim(), inventory: s.inventory === '' ? 0 : Number(s.inventory) }))
+      fd.append('variants', JSON.stringify(cleanSizes))
       images.forEach((img) => fd.append('images', img))
 
       const res = await fetch('/api/suppliers/submissions', {
@@ -78,10 +104,18 @@ export default function SubmitProductPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-submissions'] })
       setNotes('')
+      setCategory('Bed Sheets')
+      setSizes([{ title: '180x200', inventory: '' }])
       setImages([])
       setPreviews([])
     },
   })
+
+  const updateSize = (idx: number, field: keyof SizeRow, value: string) => {
+    setSizes((prev) => prev.map((s, i) => (i === idx ? { ...s, [field]: field === 'title' ? value : (value === '' ? '' : Number(value)) } : s)))
+  }
+  const addSize = () => setSizes((prev) => [...prev, { title: '', inventory: '' }])
+  const removeSize = (idx: number) => setSizes((prev) => prev.filter((_, i) => i !== idx))
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -161,15 +195,68 @@ export default function SubmitProductPage() {
             )}
           </div>
 
+          {/* Category */}
+          <div>
+            <Label className="text-base">קטגוריה *</Label>
+            <Select value={category} onValueChange={(v) => setCategory(v ?? 'Bed Sheets')}>
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="בחר קטגוריה" />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIES.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Sizes */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-base">גדלים</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addSize}>
+                <Plus className="size-3.5 me-1" />
+                הוסף גודל
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {sizes.map((s, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    placeholder="גודל (180x200)"
+                    value={s.title}
+                    onChange={(e) => updateSize(idx, 'title', e.target.value)}
+                    className="flex-1"
+                    dir="ltr"
+                  />
+                  <Input
+                    type="number"
+                    placeholder="מלאי"
+                    value={s.inventory}
+                    onChange={(e) => updateSize(idx, 'inventory', e.target.value)}
+                    className="w-28"
+                    dir="ltr"
+                  />
+                  {sizes.length > 1 && (
+                    <Button type="button" variant="ghost" size="icon" onClick={() => removeSize(idx)}>
+                      <X className="size-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">הגדלים יעלו ל-Shopify בדיוק כמו שתזין כאן</p>
+          </div>
+
           <div>
             <Label htmlFor="notes">הערות לאדמין</Label>
             <Textarea
               id="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="כל פרט שחשוב: מחיר מבוקש, גדלים, מלאי, הסבר על המוצר..."
+              placeholder="כל פרט שחשוב: מחיר מבוקש, הסבר על המוצר..."
               className="mt-1"
-              rows={4}
+              rows={3}
             />
           </div>
 

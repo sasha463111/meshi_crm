@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
     const costPrice = formData.get('cost_price') ? Number(formData.get('cost_price')) : null
     const sku = (formData.get('sku') as string) || null
     const notes = (formData.get('notes') as string) || null
+    const category = (formData.get('category') as string) || null
     const variantsJson = formData.get('variants') as string | null
     const variants = variantsJson ? JSON.parse(variantsJson) : []
 
@@ -84,6 +85,7 @@ export async function POST(request: NextRequest) {
         price,
         cost_price: costPrice,
         sku,
+        category,
         variants,
         image_urls: imageUrls,
         notes,

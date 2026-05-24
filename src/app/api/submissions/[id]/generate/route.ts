@@ -125,6 +125,22 @@ ${examples}
       return NextResponse.json({ error: 'AI returned invalid JSON', raw: text }, { status: 500 })
     }
 
+    // Override with what the SUPPLIER actually entered (sizes + category) so the
+    // product uploads exactly as submitted. AI only fills title/description/price/tags.
+    const supplierVariants = (submission.variants as Array<{ title: string; inventory?: number }>) || []
+    if (supplierVariants.length > 0) {
+      listing.variants = supplierVariants.map((v) => ({
+        title: v.title,
+        inventory: v.inventory ?? 0,
+        sku: null,
+        price: null,
+      }))
+    }
+    if (submission.category) {
+      listing.product_type = submission.category
+      listing.category = submission.category
+    }
+
     return NextResponse.json({ listing })
   } catch (error) {
     console.error('Generate error:', error)
