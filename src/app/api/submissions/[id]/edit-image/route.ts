@@ -7,11 +7,11 @@ type Action = 'clean_text' | 'clean_background' | 'enhance'
 
 const PROMPTS: Record<Action, string> = {
   clean_text:
-    'Remove all text, watermarks, logos, price tags, writing, and any graphic overlays from this image. Keep the product (bedding, sheets, pillows, etc.) and the scene exactly as they are — do not change the product, composition, lighting, or colors. Only remove text and overlays.',
+    'Edit this image to remove all text, watermarks, logos, price tags and graphic overlays. Keep the product and scene identical — same composition, lighting and colors. Output the edited image.',
   clean_background:
-    'Edit this image: keep the bedding product (sheets, pillows, duvet cover) exactly as is, but replace the background with a clean, modern, minimalist bedroom interior — soft neutral walls, warm natural lighting, professional ecommerce product photography style. Remove any text, watermarks, price tags, or foreign objects. The product itself must not change.',
+    'Generate an edited version of this image: keep the bedding product (sheets, pillows, duvet) exactly as is, but place it in a clean, modern, minimalist bedroom interior with soft neutral walls and warm natural lighting, professional ecommerce product photography. Remove any text, watermarks or foreign objects. Output the edited image.',
   enhance:
-    'Enhance this product photograph for ecommerce: improve lighting to be bright and clean, increase sharpness and detail, boost colors naturally to be vibrant but realistic, remove any text, watermarks, or price tags. Keep the product and composition exactly the same. Professional studio-quality output.',
+    'Edit this product photo: enhance the lighting to be bright and clean, increase sharpness and detail, boost colors naturally, and remove any text or watermarks. Keep the product and composition the same. Professional studio-quality ecommerce photo. Output the edited image.',
 }
 
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
@@ -76,9 +76,6 @@ export async function POST(
               ],
             },
           ],
-          generationConfig: {
-            responseModalities: ['IMAGE'],
-          },
         }),
       }
     )
@@ -100,9 +97,10 @@ export async function POST(
     const inlineData = imagePart?.inline_data || imagePart?.inlineData
 
     if (!inlineData?.data) {
+      const reason = geminiData.candidates?.[0]?.finishReason
       console.error('Gemini returned no image:', JSON.stringify(geminiData).slice(0, 500))
       return NextResponse.json(
-        { error: 'Gemini did not return an image', response: geminiData },
+        { error: `המודל לא יצר תמונה (${reason || 'NO_IMAGE'}). נסה שוב או פעולה אחרת.` },
         { status: 500 }
       )
     }
