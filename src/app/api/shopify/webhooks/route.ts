@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncOrders } from '@/lib/shopify/sync-orders'
+import { cancelPendingForPhone } from '@/lib/whatsapp/flow'
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
@@ -36,6 +37,23 @@ export async function POST(request: NextRequest) {
       // or internal_status. Runs in background so webhook returns fast.
       const since = new Date(Date.now() - 10 * 60 * 1000).toISOString()
       syncOrders(since).catch((err) => console.error('Webhook sync error:', err))
+
+      // Customer completed a purchase → cancel any pending abandoned-cart reminders.
+      if (topic === 'orders/create' || topic === 'orders/paid') {
+        try {
+          const order = JSON.parse(body)
+          const phone =
+            order?.phone ||
+            order?.customer?.phone ||
+            order?.shipping_address?.phone ||
+            order?.billing_address?.phone
+          if (phone) {
+            cancelPendingForPhone(phone, 'abandoned_cart').catch(() => {})
+          }
+        } catch {
+          /* ignore parse errors */
+        }
+      }
 
       await supabase.from('sync_logs').insert({
         source: `shopify_webhook_${topic}`,
