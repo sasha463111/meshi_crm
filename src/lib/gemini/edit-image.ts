@@ -42,42 +42,45 @@ export async function editProductImage(
   const imgBase64 = imgBuffer.toString('base64')
   const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
 
-  // Call Gemini
-  const geminiRes = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: IMAGE_EDIT_PROMPTS[action] },
-              { inline_data: { mime_type: mimeType, data: imgBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { imageConfig: { aspectRatio: '4:5' } },
-      }),
+  // Call Gemini, retrying up to 3x if it returns a white-bordered/framed image
+  let rawBuffer: Buffer | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: IMAGE_EDIT_PROMPTS[action] }, { inline_data: { mime_type: mimeType, data: imgBase64 } }] }],
+          generationConfig: { imageConfig: { aspectRatio: '4:5' } },
+        }),
+      }
+    )
+    if (!geminiRes.ok) {
+      throw new Error(`Gemini error ${geminiRes.status}: ${(await geminiRes.text()).slice(0, 200)}`)
     }
-  )
+    const geminiData = await geminiRes.json()
+    const parts = geminiData.candidates?.[0]?.content?.parts || []
+    const imagePart = parts.find((p: Record<string, unknown>) => p.inline_data || p.inlineData)
+    const inlineData = imagePart?.inline_data || imagePart?.inlineData
+    if (!inlineData?.data) continue // no image this time, retry
 
-  if (!geminiRes.ok) {
-    throw new Error(`Gemini error ${geminiRes.status}: ${(await geminiRes.text()).slice(0, 200)}`)
+    const candidate = Buffer.from(inlineData.data, 'base64')
+    // reject white-bordered/framed outputs (corner pixel near pure white)
+    try {
+      const raw = await sharp(candidate).removeAlpha().raw().toBuffer() as Buffer
+      if (raw[0] > 245 && raw[1] > 245 && raw[2] > 245) continue
+    } catch { /* ignore, accept */ }
+    rawBuffer = candidate
+    break
   }
 
-  const geminiData = await geminiRes.json()
-  const parts = geminiData.candidates?.[0]?.content?.parts || []
-  const imagePart = parts.find((p: Record<string, unknown>) => p.inline_data || p.inlineData)
-  const inlineData = imagePart?.inline_data || imagePart?.inlineData
-
-  if (!inlineData?.data) {
-    // Model declined to produce an image (e.g. nothing to clean)
+  if (!rawBuffer) {
+    // Model declined / kept returning framed images
     return null
   }
 
   // Normalise to an exact 4:5 frame (1080x1350) so it always fits the catalog card.
-  const rawBuffer = Buffer.from(inlineData.data, 'base64')
   const covered = await sharp(rawBuffer)
     .resize(FRAME_W, FRAME_H, { fit: 'cover', position: 'centre', background: FRAME_BG })
     .toBuffer()
