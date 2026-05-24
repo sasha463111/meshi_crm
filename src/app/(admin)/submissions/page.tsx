@@ -33,6 +33,17 @@ import Image from 'next/image'
 
 type StatusFilter = 'pending' | 'approved' | 'rejected' | 'all'
 
+const CATEGORY_HE: Record<string, string> = {
+  'Bed Sheets': 'מצעים',
+  'Curtains': 'וילונות',
+  'Rugs': 'שטיחים',
+  'Towels': 'מגבות',
+  'Chairs': 'כיסאות',
+  'Sofa Covers': 'כיסויי ספה',
+  'Pillows': 'כריות',
+  'Blankets': 'שמיכות',
+}
+
 interface Submission {
   id: string
   supplier_id: string
@@ -41,6 +52,7 @@ interface Submission {
   price: number | null
   cost_price: number | null
   sku: string | null
+  category: string | null
   variants: Array<{ title: string; inventory: number; price: number | null }>
   image_urls: string[]
   notes: string | null
@@ -371,6 +383,29 @@ export default function AdminSubmissionsPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* Category + sizes the supplier entered */}
+                {(s.category || (s.variants && s.variants.length > 0)) && (
+                  <div className="border-t pt-2 space-y-1.5">
+                    {s.category && (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">קטגוריה: </span>
+                        <span className="font-medium">{CATEGORY_HE[s.category] || s.category}</span>
+                      </p>
+                    )}
+                    {s.variants && s.variants.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs text-muted-foreground">גדלים:</span>
+                        {s.variants.map((v, i) => (
+                          <Badge key={i} variant="outline" className="text-[11px]" >
+                            <span dir="ltr">{v.title}</span>
+                            {v.inventory > 0 && <span className="text-muted-foreground ms-1">· {v.inventory} במלאי</span>}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {s.notes && (
                   <p className="text-xs italic text-muted-foreground border-t pt-2">
