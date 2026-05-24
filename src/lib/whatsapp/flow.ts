@@ -47,16 +47,15 @@ function israelNow(d = new Date()): { hour: number; weekday: string } {
 
 /**
  * Business-hours gate (Israel time):
- *  - never on Saturday (Shabbat)
- *  - abandoned-cart step 1 is exempt from the hour window (always ~30 min after)
- *  - everything else only sends 07:00–21:00; outside that it waits in the queue
- *    and goes out at the start of the next active day.
+ *  - Transactional order updates (confirmation / shipped) are ALWAYS sent
+ *    immediately — any hour, any day.
+ *  - Marketing / win-back messages (abandoned cart) only send Sun–Fri 07:00–21:00;
+ *    outside that they wait in the queue and go out at the next active-day open.
  */
-function canSendNow(flow: string, step: number, d = new Date()): boolean {
+function canSendNow(flow: string, _step: number, d = new Date()): boolean {
+  if (flow === 'order_update') return true // transactional — never delayed
   const { hour, weekday } = israelNow(d)
   if (weekday === 'Sat') return false
-  const exemptFromHours = flow === 'abandoned_cart' && step === 1
-  if (exemptFromHours) return true
   return hour >= 7 && hour < 21
 }
 
