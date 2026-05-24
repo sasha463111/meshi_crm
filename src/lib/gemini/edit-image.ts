@@ -80,7 +80,7 @@ export async function editProductImage(
   // auto-crop the uniform #EAE9E6 margins first so the product fills the frame
   // (no floating). Then cover-fit so the frame is always completely filled.
   const rawBuffer = Buffer.from(inlineData.data, 'base64')
-  let sourceForFrame = rawBuffer
+  let sourceForFrame: Buffer = rawBuffer
   if (action === 'white_background') {
     sourceForFrame = await autoCropBackground(rawBuffer)
   }
@@ -111,7 +111,7 @@ async function autoCropBackground(buffer: Buffer): Promise<Buffer> {
     const height = meta.height || 0
     if (!width || !height) return buffer
 
-    const raw = await sharp(buffer).removeAlpha().raw().toBuffer()
+    const raw = await sharp(buffer).removeAlpha().raw().toBuffer() as Buffer
     const ch = 3
     const bg = [raw[0], raw[1], raw[2]]
     const thr = 22
@@ -136,7 +136,7 @@ async function autoCropBackground(buffer: Buffer): Promise<Buffer> {
     maxY = Math.min(height, maxY + pad)
     return await sharp(buffer)
       .extract({ left: minX, top: minY, width: maxX - minX, height: maxY - minY })
-      .toBuffer()
+      .toBuffer() as Buffer
   } catch {
     return buffer
   }
