@@ -51,11 +51,14 @@ export async function scanAndEnqueueOrderUpdates(): Promise<{ scanned: number; e
     if (!phone) continue
     const name = firstName(o.firstName)
 
-    // Confirmation
+    // Confirmation (English + Hebrew token aliases)
     const confirm = render(tmpl[1] || DEFAULTS[1], {
       name,
+      'שם': name,
       order: o.number,
+      'הזמנה': o.number,
       link: o.statusUrl || '',
+      'קישור': o.statusUrl || '',
     })
     if (
       await enqueueJob({
@@ -75,8 +78,11 @@ export async function scanAndEnqueueOrderUpdates(): Promise<{ scanned: number; e
     if (o.fulfilledAt) {
       const shipped = render(tmpl[2] || DEFAULTS[2], {
         name,
+        'שם': name,
         order: o.number,
+        'הזמנה': o.number,
         tracking: o.trackingNumber || 'יעודכן בהמשך',
+        'מעקב': o.trackingNumber || 'יעודכן בהמשך',
       })
       if (
         await enqueueJob({

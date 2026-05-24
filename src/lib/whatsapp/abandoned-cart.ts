@@ -24,7 +24,9 @@ function firstName(s: string | null): string {
 function render(template: string, name: string, link: string): string {
   return template
     .replace(/\{name\}/g, name)
+    .replace(/\{שם\}/g, name)
     .replace(/\{link\}/g, link)
+    .replace(/\{קישור\}/g, link)
     .replace(/ {2,}/g, ' ') // collapse the double space left when {name} is empty
     .trim()
 }

@@ -212,8 +212,11 @@ export default function WhatsAppAutomationPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            ניתן לערוך את הטקסטים. השתמש ב-<code className="bg-muted px-1 rounded">{'{name}'}</code> לשם הלקוח/ה
-            וב-<code className="bg-muted px-1 rounded">{'{link}'}</code> לקישור השחזור.
+            ניתן לערוך את הטקסטים. אסימונים זמינים (גם בעברית):{' '}
+            <code className="bg-muted px-1 rounded">{'{שם}'}</code>,{' '}
+            <code className="bg-muted px-1 rounded">{'{קישור}'}</code>,{' '}
+            <code className="bg-muted px-1 rounded">{'{הזמנה}'}</code>,{' '}
+            <code className="bg-muted px-1 rounded">{'{מעקב}'}</code> — יוחלפו אוטומטית בשליחה.
           </p>
           {templatesQ.isLoading ? (
             <Loader2 className="size-5 animate-spin" />
