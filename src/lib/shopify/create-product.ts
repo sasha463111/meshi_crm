@@ -15,6 +15,22 @@ export interface CreateProductInput {
   status?: 'ACTIVE' | 'DRAFT'
 }
 
+// Shopify standard taxonomy category IDs per product type
+const CATEGORY_IDS: Record<string, string> = {
+  'Bed Sheets': 'gid://shopify/TaxonomyCategory/hg-15-1-2',
+  'Curtains': 'gid://shopify/TaxonomyCategory/hg-3-74-1-1',
+  'Rugs': 'gid://shopify/TaxonomyCategory/hg-3-57',
+  'Towels': 'gid://shopify/TaxonomyCategory/hg-15-4',
+  'Chairs': 'gid://shopify/TaxonomyCategory/fr-7',
+  'Pillows': 'gid://shopify/TaxonomyCategory/hg-15-1-9',
+  'Blankets': 'gid://shopify/TaxonomyCategory/hg-15-1-4',
+  'Sofa Covers': 'gid://shopify/TaxonomyCategory/hg-3-57', // fallback (decor)
+}
+
+const ONLINE_STORE_PUBLICATION_ID = 'gid://shopify/Publication/319801491529'
+const LOCATION_ID = 'gid://shopify/Location/112862625865'
+const DEFAULT_INVENTORY = 100
+
 const PRODUCT_CREATE_MUTATION = `
   mutation productCreate($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
     productCreate(product: $product, media: $media) {
@@ -23,15 +39,10 @@ const PRODUCT_CREATE_MUTATION = `
         title
         handle
         variants(first: 10) {
-          edges {
-            node { id title }
-          }
+          edges { node { id title } }
         }
       }
-      userErrors {
-        field
-        message
-      }
+      userErrors { field message }
     }
   }
 `
@@ -55,6 +66,14 @@ const PRODUCT_VARIANT_UPDATE = `
   }
 `
 
+const PUBLISH_MUTATION = `
+  mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+    publishablePublish(id: $id, input: $input) {
+      userErrors { field message }
+    }
+  }
+`
+
 export async function createShopifyProduct(input: CreateProductInput): Promise<{
   shopifyProductId: string
   handle: string
@@ -73,16 +92,14 @@ export async function createShopifyProduct(input: CreateProductInput): Promise<{
   }
   if (input.productType) product.productType = input.productType
   if (input.vendor) product.vendor = input.vendor
-  // Category - Shopify uses category taxonomy, but productType + tags also work.
-  // We set productType as the main "category" since existing products use it that way.
 
-  // If variants provided, add productOptions so we can create variants with those option values
+  // Auto-fill the Shopify standard category based on product type
+  const categoryId = input.productType ? CATEGORY_IDS[input.productType] : undefined
+  if (categoryId) product.category = categoryId
+
   if (input.variants && input.variants.length > 0) {
     product.productOptions = [
-      {
-        name: 'גודל',
-        values: input.variants.map((v) => ({ name: v.title })),
-      },
+      { name: 'גודל', values: input.variants.map((v) => ({ name: v.title })) },
     ]
   }
 
@@ -108,44 +125,41 @@ export async function createShopifyProduct(input: CreateProductInput): Promise<{
   const newProduct = createRes.productCreate.product
   if (!newProduct) throw new Error('Shopify product create returned no product')
 
-  // Handle variants — update the auto-created ones (or create more)
+  const defaultPrice = input.price ?? 0
+
+  // Helper: inventory config for each variant (tracked + 100 at location)
+  const invConfig = (sku?: string | null) => ({
+    inventoryItem: { tracked: true, ...(sku ? { sku } : {}) },
+    inventoryQuantities: [{ availableQuantity: DEFAULT_INVENTORY, locationId: LOCATION_ID }],
+  })
+
   if (input.variants && input.variants.length > 0) {
-    const defaultPrice = input.price ?? 0
     const createdVariants = newProduct.variants.edges.map((e) => e.node)
 
-    // Build variant inputs with prices and inventory-related fields
-    const variantInputs = input.variants.map((v, idx) => {
-      const existing = createdVariants[idx]
-      return {
-        id: existing?.id,
-        price: String(v.price ?? defaultPrice),
-        inventoryItem: v.sku ? { sku: v.sku } : {},
-        ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
-      }
-    }).filter((v) => v.id)
+    // Update the auto-created variants with price + inventory
+    const variantInputs = input.variants.slice(0, createdVariants.length).map((v, idx) => ({
+      id: createdVariants[idx].id,
+      price: String(v.price ?? defaultPrice),
+      ...invConfig(v.sku),
+      ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
+    }))
 
     if (variantInputs.length > 0) {
-      await shopifyGraphQL(PRODUCT_VARIANT_UPDATE, {
-        productId: newProduct.id,
-        variants: variantInputs,
-      })
+      await shopifyGraphQL(PRODUCT_VARIANT_UPDATE, { productId: newProduct.id, variants: variantInputs })
     }
 
-    // If user provided more variants than Shopify auto-created, create the extras
+    // Create any extra variants beyond the auto-created one
     if (input.variants.length > createdVariants.length) {
       const extras = input.variants.slice(createdVariants.length).map((v) => ({
         optionValues: [{ optionName: 'גודל', name: v.title }],
         price: String(v.price ?? defaultPrice),
-        ...(v.sku ? { inventoryItem: { sku: v.sku } } : {}),
+        ...invConfig(v.sku),
         ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
       }))
-      await shopifyGraphQL(PRODUCT_VARIANTS_BULK_CREATE, {
-        productId: newProduct.id,
-        variants: extras,
-      })
+      await shopifyGraphQL(PRODUCT_VARIANTS_BULK_CREATE, { productId: newProduct.id, variants: extras })
     }
-  } else if (input.price) {
-    // No variants — just update the default variant price
+  } else {
+    // No sizes — set price + inventory on the default variant
     const defaultVariant = newProduct.variants.edges[0]?.node
     if (defaultVariant) {
       await shopifyGraphQL(PRODUCT_VARIANT_UPDATE, {
@@ -153,12 +167,24 @@ export async function createShopifyProduct(input: CreateProductInput): Promise<{
         variants: [
           {
             id: defaultVariant.id,
-            price: String(input.price),
-            ...(input.sku ? { inventoryItem: { sku: input.sku } } : {}),
+            price: String(input.price ?? defaultPrice),
+            ...invConfig(input.sku),
             ...(input.compareAtPrice ? { compareAtPrice: String(input.compareAtPrice) } : {}),
           },
         ],
       })
+    }
+  }
+
+  // Publish to the Online Store sales channel so it shows on the site
+  if ((input.status || 'ACTIVE') === 'ACTIVE') {
+    try {
+      await shopifyGraphQL(PUBLISH_MUTATION, {
+        id: newProduct.id,
+        input: [{ publicationId: ONLINE_STORE_PUBLICATION_ID }],
+      })
+    } catch (err) {
+      console.error('Publish to online store failed:', err)
     }
   }
 
