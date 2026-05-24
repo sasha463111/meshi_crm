@@ -598,6 +598,32 @@ export default function AdminSubmissionsPage() {
                 />
               </div>
 
+              {/* Promo tier quick-select (strategy) */}
+              <div className="rounded-lg border p-3 bg-amber-50/50">
+                <Label className="text-sm font-medium">מדרגת מבצע (אסטרטגיה)</Label>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={listing.price === 79 ? 'default' : 'outline'}
+                    onClick={() => updateListing('price', 79)}
+                  >
+                    מבצע 4 ב-219 (₪79)
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={listing.price === 129 ? 'default' : 'outline'}
+                    onClick={() => updateListing('price', 129)}
+                  >
+                    פרימיום ₪129 (מחוץ למבצע)
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  מחיר ₪79 = נכנס אוטומטית למבצע 4 ב-219. ₪129 = פרימיום בודד מחוץ למבצע.
+                </p>
+              </div>
+
               {/* Price row */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
