@@ -36,8 +36,39 @@ const PRODUCTS_QUERY = `
   }
 `
 
+// The product.status field is unreliable in bulk queries (returns ACTIVE for
+// products that are actually archived/draft). The search query "status:active"
+// is authoritative — it matches what's truly active on the storefront.
+const ACTIVE_IDS_QUERY = `
+  query activeIds($first: Int!, $after: String) {
+    products(first: $first, after: $after, query: "status:active") {
+      edges { cursor node { id } }
+      pageInfo { hasNextPage }
+    }
+  }
+`
+
+async function fetchActiveProductIds(): Promise<Set<string>> {
+  const ids = new Set<string>()
+  let after: string | null = null
+  let hasNext = true
+  interface Resp {
+    products: { edges: { cursor: string; node: { id: string } }[]; pageInfo: { hasNextPage: boolean } }
+  }
+  while (hasNext) {
+    const data: Resp = await shopifyGraphQL(ACTIVE_IDS_QUERY, { first: 250, after })
+    for (const edge of data.products.edges) {
+      ids.add(extractIdFromGid(edge.node.id))
+      after = edge.cursor
+    }
+    hasNext = data.products.pageInfo.hasNextPage
+  }
+  return ids
+}
+
 export async function syncProducts() {
   const supabase = createAdminClient()
+  const activeIds = await fetchActiveProductIds()
 
   const { data: log } = await supabase
     .from('sync_logs')
@@ -98,7 +129,8 @@ export async function syncProducts() {
             images,
             inventory_quantity: variant.inventoryQuantity as number || 0,
             weight: null,
-            status: (product.status as string).toLowerCase(),
+            // Use authoritative active set, not the unreliable status field
+            status: activeIds.has(shopifyProductId) ? 'active' : 'archived',
             shopify_data: product,
             last_synced_at: new Date().toISOString(),
           }

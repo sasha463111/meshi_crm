@@ -167,9 +167,8 @@ export default function SupplierProductsPage() {
   const products = data?.products || []
   const searchLower = search.trim().toLowerCase()
 
-  // "available" = active, published to store, has real sizes, and purchasable
-  const isAvailable = (p: Product) =>
-    p.status === 'active' && p.published && p.variants.length > 0 && p.available_for_sale
+  // "available" = active on the storefront AND has at least one real size
+  const isAvailable = (p: Product) => p.status === 'active' && p.variants.length > 0
 
   const availableCount = products.filter(isAvailable).length
   const inactiveCount = products.filter((p) => p.status !== 'active').length
