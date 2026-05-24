@@ -20,7 +20,7 @@ export const IMAGE_EDIT_PROMPTS: Record<ImageEditAction, string> = {
   enhance:
     'Edit this product photo: enhance the lighting to be bright and clean, increase sharpness and detail, boost colors naturally, and remove any text, watermarks, brochures or price tags. Keep the bedding product the same. Professional studio-quality ecommerce photo. Output the edited image.',
   white_background:
-    'Professional ecommerce catalog photo of this exact bedding set on a solid #EAE9E6 (soft warm light grey-beige) background. CLOSE-UP framing: the bedding (duvet and pillows) must FILL THE FRAME from edge to edge, extending close to all four sides with only a thin even margin. Center it. Do NOT show large empty background space, do NOT show a bed frame or legs, do NOT make it float in the middle. Just the styled bedding filling the frame. Keep the product PIXEL-PERFECT identical — same pattern, print, texture, colors and shape. Crisp high detail, soft even studio lighting. The background must be solid #EAE9E6. Output the edited image.',
+    'Cut out ONLY the bed with its bedding (duvet, pillows and the upholstered bed base/headboard) from this photo and place it on a plain solid #EAE9E6 (warm light grey-beige) background. COMPLETELY REMOVE the room, walls, window, curtains, lamp, nightstand and floor — replace everything around the bed with the solid #EAE9E6 color. The bed must be large and fill the frame, firmly grounded at the bottom (NOT floating). Keep the bedding pattern, print, texture and colors PIXEL-PERFECT identical. Professional ecommerce catalog photo, crisp high detail. Output the edited image.',
 }
 
 /**
@@ -113,8 +113,13 @@ async function autoCropBackground(buffer: Buffer): Promise<Buffer> {
 
     const raw = await sharp(buffer).removeAlpha().raw().toBuffer() as Buffer
     const ch = 3
-    const bg = [raw[0], raw[1], raw[2]]
-    const thr = 22
+    // background = average of the four corners (more robust than a single pixel)
+    const corners = [[0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1]].map(([x, y]) => {
+      const i = (y * width + x) * ch
+      return [raw[i], raw[i + 1], raw[i + 2]]
+    })
+    const bg = [0, 1, 2].map((k) => Math.round(corners.reduce((a, c) => a + c[k], 0) / 4))
+    const thr = 30
     let minX = width, minY = height, maxX = 0, maxY = 0
     for (let y = 0; y < height; y += 2) {
       for (let x = 0; x < width; x += 2) {
