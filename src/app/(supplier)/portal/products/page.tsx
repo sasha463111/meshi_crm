@@ -9,8 +9,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Search, X, Upload, Package, ZoomIn, Loader2, RefreshCw, EyeOff, Eye } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Search, X, Upload, Package, ZoomIn, Loader2, RefreshCw, EyeOff, Eye, Plus } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -32,6 +33,7 @@ function categoryLabel(productType: string | null): string {
 }
 
 interface Variant {
+  id: string
   title: string
   price: string
   sku: string | null
@@ -61,6 +63,10 @@ export default function SupplierProductsPage() {
   const [activeCategory, setActiveCategory] = useState<string>('all')
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [variantBusy, setVariantBusy] = useState<string | null>(null) // variantId or "add-<productId>"
+  const [addSizeProduct, setAddSizeProduct] = useState<Product | null>(null)
+  const [newSize, setNewSize] = useState('')
+  const [newSizePrice, setNewSizePrice] = useState<number | ''>('')
   const autoSyncDone = useRef(false)
 
   const { data, isLoading } = useQuery({
@@ -128,6 +134,31 @@ export default function SupplierProductsPage() {
       setSyncResult(`שגיאה: ${(e as Error).message}`)
       setTimeout(() => setSyncResult(null), 6000)
       setTogglingId(null)
+    },
+  })
+
+  const variantMutation = useMutation({
+    mutationFn: async (vars: { productId: string; action: 'add' | 'delete'; variantId?: string; size?: string; price?: number }) => {
+      const res = await fetch(`/api/suppliers/products/${vars.productId}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-supplier-token': supplier!.access_token },
+        body: JSON.stringify(vars),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Failed')
+      return d
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['supplier-products'] })
+      setVariantBusy(null)
+      setAddSizeProduct(null)
+      setNewSize('')
+      setNewSizePrice('')
+    },
+    onError: (e) => {
+      setSyncResult(`שגיאה: ${(e as Error).message}`)
+      setTimeout(() => setSyncResult(null), 6000)
+      setVariantBusy(null)
     },
   })
 
@@ -293,24 +324,42 @@ export default function SupplierProductsPage() {
                       </div>
                     </div>
 
-                    {/* Variants / sizes */}
-                    {p.variants.length > 0 && (
-                      <div className="px-3 pb-2">
-                        <div className="flex flex-wrap gap-1">
-                          {p.variants.map((v, i) => (
-                            <span
-                              key={i}
-                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${v.inventory > 0 ? 'bg-background' : 'bg-muted text-muted-foreground'}`}
-                              title={v.sku || ''}
+                    {/* Variants / sizes — each removable, plus add-size */}
+                    <div className="px-3 pb-2">
+                      <div className="flex flex-wrap gap-1 items-center">
+                        {p.variants.map((v) => (
+                          <span
+                            key={v.id}
+                            className={`group/chip inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${v.inventory > 0 ? 'bg-background' : 'bg-muted text-muted-foreground'}`}
+                            title={v.sku || ''}
+                          >
+                            {v.title}
+                            <span className="text-muted-foreground">·</span>
+                            {v.inventory > 0 ? `${v.inventory} במלאי` : 'אזל'}
+                            <button
+                              className="ms-0.5 rounded-full hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors disabled:opacity-50"
+                              title="הסר גודל זה"
+                              disabled={variantBusy === v.id || p.variants.length <= 1}
+                              onClick={() => {
+                                if (p.variants.length <= 1) return
+                                if (!confirm(`להסיר את הגודל "${v.title}"?`)) return
+                                setVariantBusy(v.id)
+                                variantMutation.mutate({ productId: p.id, action: 'delete', variantId: v.id })
+                              }}
                             >
-                              {v.title}
-                              <span className="text-muted-foreground">·</span>
-                              {v.inventory > 0 ? `${v.inventory} במלאי` : 'אזל'}
-                            </span>
-                          ))}
-                        </div>
+                              {variantBusy === v.id ? <Loader2 className="size-2.5 animate-spin" /> : <X className="size-2.5" />}
+                            </button>
+                          </span>
+                        ))}
+                        <button
+                          className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+                          onClick={() => { setAddSizeProduct(p); setNewSize(''); setNewSizePrice(p.price || '') }}
+                        >
+                          <Plus className="size-2.5" />
+                          גודל
+                        </button>
                       </div>
-                    )}
+                    </div>
 
                     {/* Activate / Deactivate action */}
                     <div className="mt-auto border-t px-3 py-2">
@@ -345,6 +394,65 @@ export default function SupplierProductsPage() {
           ))}
         </div>
       )}
+
+      {/* Add size dialog */}
+      <Dialog open={!!addSizeProduct} onOpenChange={(v) => !v && setAddSizeProduct(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>הוספת גודל ל&quot;{addSizeProduct?.title}&quot;</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="new-size">גודל</Label>
+              <Input
+                id="new-size"
+                value={newSize}
+                onChange={(e) => setNewSize(e.target.value)}
+                placeholder="לדוגמה: 200X180"
+                className="mt-1"
+                dir="ltr"
+              />
+            </div>
+            <div>
+              <Label htmlFor="new-size-price">מחיר (₪)</Label>
+              <Input
+                id="new-size-price"
+                type="number"
+                value={newSizePrice}
+                onChange={(e) => setNewSizePrice(e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="79"
+                className="mt-1"
+                dir="ltr"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              הגודל יתווסף למוצר ב-Shopify. את כמות המלאי תוכל לעדכן ב-Shopify.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setAddSizeProduct(null)}>
+                ביטול
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={!newSize.trim() || variantBusy === `add-${addSizeProduct?.id}`}
+                onClick={() => {
+                  if (!addSizeProduct) return
+                  setVariantBusy(`add-${addSizeProduct.id}`)
+                  variantMutation.mutate({
+                    productId: addSizeProduct.id,
+                    action: 'add',
+                    size: newSize.trim(),
+                    price: newSizePrice === '' ? 0 : Number(newSizePrice),
+                  })
+                }}
+              >
+                {variantBusy === `add-${addSizeProduct?.id}` && <Loader2 className="size-4 me-1 animate-spin" />}
+                הוסף גודל
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Image zoom */}
       <Dialog open={!!zoomedImage} onOpenChange={() => setZoomedImage(null)}>

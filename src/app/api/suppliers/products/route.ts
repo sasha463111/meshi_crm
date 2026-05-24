@@ -23,6 +23,10 @@ interface ShopifyVariant {
   compareAtPrice: string | null
 }
 
+function variantNumericId(gid: string): string {
+  return gid.split('/').pop() || gid
+}
+
 // GET: all products available on the store, with their variants/sizes
 export async function GET(request: NextRequest) {
   const supplierId = await verifySupplier(request)
@@ -44,6 +48,7 @@ export async function GET(request: NextRequest) {
       .map((e) => e.node)
       .filter((v) => v.title !== 'Default Title')
       .map((v) => ({
+        id: variantNumericId(v.id),
         title: v.title,
         price: v.price,
         sku: v.sku,
