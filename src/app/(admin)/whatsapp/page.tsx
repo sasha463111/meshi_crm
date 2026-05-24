@@ -12,6 +12,7 @@ import {
   User, Plus, Paperclip, FileText, Image as ImageIcon
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
+import { WhatsAppStatusBar } from '@/components/whatsapp/connection-banner'
 
 interface Chat {
   id: string
@@ -344,6 +345,7 @@ export default function WhatsAppPage() {
   // ===== CHAT LIST VIEW =====
   return (
     <div className="space-y-3">
+      <WhatsAppStatusBar />
       {/* Header - WhatsApp style */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-[#075E54]">WhatsApp</h1>

@@ -31,6 +31,7 @@ import {
   SidebarFooter,
 } from '@/components/ui/sidebar'
 import { useAuth } from '@/providers/auth-provider'
+import { WhatsAppNavDot } from '@/components/whatsapp/connection-banner'
 
 const navItems = [
   { title: 'דשבורד', href: '/dashboard', icon: LayoutDashboard },
@@ -76,6 +77,7 @@ export function AdminSidebar() {
                   >
                     <item.icon className="size-4" />
                     <span>{item.title}</span>
+                    {item.href === '/whatsapp' && <WhatsAppNavDot />}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
