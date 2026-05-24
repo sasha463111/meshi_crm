@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { setShopifyProductStatus } from '@/lib/shopify/archive-product'
 
 async function verifySupplier(request: NextRequest) {
   const token = request.headers.get('x-supplier-token')
@@ -15,8 +14,8 @@ async function verifySupplier(request: NextRequest) {
   return data?.id || null
 }
 
-// POST: supplier directly activates/deactivates a product (updates Shopify + DB)
-// body: { active: boolean }  active=false => DRAFT (removed from store), active=true => ACTIVE
+// POST: supplier REQUESTS to activate/deactivate a product (pending admin approval)
+// body: { active: boolean }
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -30,35 +29,39 @@ export async function POST(
   const supabase = createAdminClient()
   const { data: product } = await supabase
     .from('products')
-    .select('id, shopify_product_id')
+    .select('id, shopify_product_id, title, images')
     .eq('id', id)
     .single()
 
   if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
-  try {
-    const newStatus = active ? 'ACTIVE' : 'DRAFT'
-    await setShopifyProductStatus(product.shopify_product_id, newStatus)
+  const image = (product.images as Array<{ url: string }> | null)?.[0]?.url || null
 
-    await supabase
-      .from('products')
-      .update({
-        status: active ? 'active' : 'draft',
-        // clear any legacy removal flags
-        removal_requested: false,
-        removal_requested_at: null,
-        removal_requested_by: null,
-        removal_reason: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
+  // Prevent duplicate pending request of same action
+  const { data: existing } = await supabase
+    .from('product_change_requests')
+    .select('id')
+    .eq('product_id', id)
+    .eq('action', active ? 'activate' : 'deactivate')
+    .eq('status', 'pending')
+    .maybeSingle()
 
-    return NextResponse.json({ success: true, status: active ? 'active' : 'draft' })
-  } catch (error) {
-    console.error('Status toggle error:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to update status' },
-      { status: 500 }
-    )
+  if (existing) {
+    return NextResponse.json({ success: true, alreadyPending: true })
   }
+
+  const { error } = await supabase.from('product_change_requests').insert({
+    supplier_id: supplierId,
+    product_id: id,
+    shopify_product_id: product.shopify_product_id,
+    product_title: product.title,
+    product_image: image,
+    action: active ? 'activate' : 'deactivate',
+    payload: {},
+    status: 'pending',
+  })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ success: true, pending: true })
 }

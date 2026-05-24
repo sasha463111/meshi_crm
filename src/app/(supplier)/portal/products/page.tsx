@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Search, X, Upload, Package, ZoomIn, Loader2, RefreshCw, EyeOff, Eye, Plus } from 'lucide-react'
+import { Search, X, Upload, Package, ZoomIn, Loader2, RefreshCw, EyeOff, Eye, Plus, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -54,6 +54,10 @@ interface Product {
   product_type: string | null
   removal_requested: boolean
   removal_requested_at: string | null
+  pending_deactivate: boolean
+  pending_activate: boolean
+  pending_remove_variant_ids: string[]
+  pending_add_sizes: string[]
 }
 
 export default function SupplierProductsPage() {
@@ -130,6 +134,8 @@ export default function SupplierProductsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-products'] })
+      setSyncResult('✓ הבקשה נשלחה לאישור')
+      setTimeout(() => setSyncResult(null), 5000)
       setTogglingId(null)
     },
     onError: (e) => {
@@ -140,7 +146,7 @@ export default function SupplierProductsPage() {
   })
 
   const variantMutation = useMutation({
-    mutationFn: async (vars: { productId: string; action: 'add' | 'delete'; variantId?: string; size?: string; price?: number }) => {
+    mutationFn: async (vars: { productId: string; action: 'add' | 'delete'; variantId?: string; variant_title?: string; size?: string; price?: number }) => {
       const res = await fetch(`/api/suppliers/products/${vars.productId}/variants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-supplier-token': supplier!.access_token },
@@ -152,6 +158,8 @@ export default function SupplierProductsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier-products'] })
+      setSyncResult('✓ הבקשה נשלחה לאישור')
+      setTimeout(() => setSyncResult(null), 5000)
       setVariantBusy(null)
       setAddSizeProduct(null)
       setNewSize('')
@@ -296,101 +304,138 @@ export default function SupplierProductsPage() {
                 <div className="flex-1 h-px bg-border" />
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {catProducts.map((p) => (
+                {catProducts.map((p) => {
+                  const deactivatePending = p.pending_deactivate
+                  const activatePending = p.pending_activate
+                  return (
                   <div
                     key={p.id}
-                    className={`rounded-lg border overflow-hidden flex flex-col ${p.status !== 'active' ? 'border-muted bg-muted/30 opacity-80' : ''}`}
+                    className={`rounded-xl border overflow-hidden flex flex-col ${p.status !== 'active' ? 'border-muted bg-muted/30 opacity-90' : ''}`}
                   >
-                    <div className="flex gap-3 p-3">
+                    <div className="flex gap-3 p-4">
                       {p.image ? (
-                        <div className="relative size-20 rounded-md overflow-hidden shrink-0 cursor-pointer group" onClick={() => setZoomedImage(p.image)}>
+                        <div className="relative size-24 rounded-lg overflow-hidden shrink-0 cursor-pointer group" onClick={() => setZoomedImage(p.image)}>
                           <Image src={p.image} alt={p.title} fill className="object-cover" />
                           <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <ZoomIn className="size-4 text-white" />
+                            <ZoomIn className="size-5 text-white" />
                           </div>
                         </div>
                       ) : (
-                        <div className="size-20 rounded-md bg-muted flex items-center justify-center shrink-0">
-                          <Package className="size-6 text-muted-foreground" />
+                        <div className="size-24 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                          <Package className="size-7 text-muted-foreground" />
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm leading-tight line-clamp-2">{p.title}</p>
-                        <p className="text-sm font-bold mt-1">{formatCurrency(Number(p.price))}</p>
-                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                          <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-[10px]">
-                            {p.status === 'active' ? 'באתר' : p.status === 'draft' ? 'טיוטה' : p.status}
+                        <p className="font-semibold text-sm leading-tight line-clamp-2">{p.title}</p>
+                        <p className="text-base font-bold mt-1">{formatCurrency(Number(p.price))}</p>
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-[11px]">
+                            {p.status === 'active' ? 'באתר' : 'לא פעיל'}
                           </Badge>
-                          <span className="text-[11px] text-muted-foreground">מלאי: {p.total_inventory}</span>
+                          <span className="text-xs text-muted-foreground">מלאי כולל: {p.total_inventory}</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Variants / sizes — each removable, plus add-size */}
-                    <div className="px-3 pb-2">
-                      <div className="flex flex-wrap gap-1 items-center">
-                        {p.variants.map((v) => (
-                          <span
-                            key={v.id}
-                            className={`group/chip inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${v.inventory > 0 ? 'bg-background' : 'bg-muted text-muted-foreground'}`}
-                            title={v.sku || ''}
-                          >
-                            {v.title}
-                            <span className="text-muted-foreground">·</span>
-                            {v.inventory > 0 ? `${v.inventory} במלאי` : 'אזל'}
-                            <button
-                              className="ms-0.5 rounded-full hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors disabled:opacity-50"
-                              title="הסר גודל זה"
-                              disabled={variantBusy === v.id || p.variants.length <= 1}
-                              onClick={() => {
-                                if (p.variants.length <= 1) return
-                                if (!confirm(`להסיר את הגודל "${v.title}"?`)) return
-                                setVariantBusy(v.id)
-                                variantMutation.mutate({ productId: p.id, action: 'delete', variantId: v.id })
-                              }}
-                            >
-                              {variantBusy === v.id ? <Loader2 className="size-2.5 animate-spin" /> : <X className="size-2.5" />}
-                            </button>
-                          </span>
-                        ))}
+                    {/* Sizes — bigger, clearer */}
+                    <div className="px-4 pb-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-bold">גדלים</span>
                         <button
-                          className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+                          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-foreground/30 px-2.5 py-1 text-xs font-medium text-foreground/70 hover:text-foreground hover:border-foreground/60 transition-colors"
                           onClick={() => { setAddSizeProduct(p); setNewSize(''); setNewSizePrice(p.price || '') }}
                         >
-                          <Plus className="size-2.5" />
-                          גודל
+                          <Plus className="size-3.5" />
+                          הוסף גודל
                         </button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {p.variants.map((v) => {
+                          const removePending = p.pending_remove_variant_ids.includes(v.id)
+                          return (
+                            <div
+                              key={v.id}
+                              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${removePending ? 'border-orange-300 bg-orange-50' : 'bg-background'}`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-semibold text-sm" dir="ltr">{v.title}</span>
+                                <span className={`text-xs ${v.inventory > 0 ? 'text-muted-foreground' : 'text-red-500'}`}>
+                                  {v.inventory > 0 ? `${v.inventory} במלאי` : 'אזל מהמלאי'}
+                                </span>
+                              </div>
+                              {removePending ? (
+                                <span className="text-[11px] text-orange-600 font-medium flex items-center gap-1 shrink-0">
+                                  <Loader2 className="size-3 animate-spin" />
+                                  ממתין לאישור הסרה
+                                </span>
+                              ) : (
+                                <button
+                                  className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                                  title="בקש הסרת גודל זה"
+                                  disabled={p.variants.length <= 1}
+                                  onClick={() => {
+                                    if (p.variants.length <= 1) return
+                                    if (!confirm(`לשלוח בקשה להסרת הגודל "${v.title}"? הבקשה תישלח לאישור.`)) return
+                                    variantMutation.mutate({ productId: p.id, action: 'delete', variantId: v.id, variant_title: v.title })
+                                  }}
+                                >
+                                  <Trash2 className="size-3.5" />
+                                  הסר
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                        {/* pending add-size rows */}
+                        {p.pending_add_sizes.map((sz, i) => (
+                          <div key={`add-${i}`} className="flex items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2">
+                            <span className="font-semibold text-sm" dir="ltr">{sz}</span>
+                            <span className="text-[11px] text-blue-600 font-medium flex items-center gap-1">
+                              <Loader2 className="size-3 animate-spin" />
+                              ממתין לאישור הוספה
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
                     {/* Activate / Deactivate action */}
-                    <div className="mt-auto border-t px-3 py-2">
-                      {p.status === 'active' ? (
+                    <div className="mt-auto border-t px-4 py-2.5">
+                      {deactivatePending || activatePending ? (
+                        <div className="w-full text-center text-sm text-orange-600 font-medium flex items-center justify-center gap-1.5">
+                          <Loader2 className="size-4 animate-spin" />
+                          {deactivatePending ? 'ממתין לאישור הורדה מהאתר' : 'ממתין לאישור החזרה לאתר'}
+                        </div>
+                      ) : p.status === 'active' ? (
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="w-full text-xs h-7 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          onClick={() => statusMutation.mutate({ id: p.id, active: false })}
+                          className="w-full text-sm h-9 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => {
+                            if (!confirm('לשלוח בקשה להורדת המוצר מהאתר? הבקשה תישלח לאישור.')) return
+                            statusMutation.mutate({ id: p.id, active: false })
+                          }}
                           disabled={togglingId === p.id}
                         >
-                          {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <EyeOff className="size-3 me-1" />}
-                          הורד מהאתר
+                          {togglingId === p.id ? <Loader2 className="size-4 me-1 animate-spin" /> : <EyeOff className="size-4 me-1" />}
+                          בקש הורדה מהאתר
                         </Button>
                       ) : (
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="w-full text-xs h-7 text-green-600 hover:bg-green-50 hover:text-green-700"
+                          className="w-full text-sm h-9 text-green-600 hover:bg-green-50 hover:text-green-700"
                           onClick={() => statusMutation.mutate({ id: p.id, active: true })}
                           disabled={togglingId === p.id}
                         >
-                          {togglingId === p.id ? <Loader2 className="size-3 me-1 animate-spin" /> : <Eye className="size-3 me-1" />}
-                          החזר לאתר
+                          {togglingId === p.id ? <Loader2 className="size-4 me-1 animate-spin" /> : <Eye className="size-4 me-1" />}
+                          בקש החזרה לאתר
                         </Button>
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           ))}
