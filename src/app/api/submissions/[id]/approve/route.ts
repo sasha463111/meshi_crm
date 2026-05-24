@@ -20,6 +20,8 @@ interface ApprovePayload {
   image_urls?: string[] // Selected images (subset of submission's images)
   status?: 'ACTIVE' | 'DRAFT'
   auto_images?: boolean // default true: auto-generate cream + room bg from first image
+  appeal_score?: number | null // 1..10 desirability rating from generate
+  appeal_reason?: string | null
 }
 
 export async function POST(
@@ -117,6 +119,16 @@ export async function POST(
       images: (input.imageUrls || []).map((url: string) => ({ url, alt: input.title })),
       status: input.status === 'ACTIVE' ? 'active' : 'draft',
     })
+
+    // Best-effort: store the appeal rating (skip silently if columns/migration
+    // 009 not applied yet, so product creation never fails on this).
+    if (payload.appeal_score != null || payload.appeal_reason != null) {
+      const { error: appealErr } = await supabase
+        .from('products')
+        .update({ appeal_score: payload.appeal_score ?? null, appeal_reason: payload.appeal_reason ?? null })
+        .eq('shopify_product_id', shopifyProductId)
+      if (appealErr) console.warn('Appeal rating not stored (run migration 009):', appealErr.message)
+    }
 
     // Mark submission approved
     await supabase

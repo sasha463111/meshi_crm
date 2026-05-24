@@ -13,6 +13,8 @@ interface GeneratedListing {
   category: string
   vendor: string
   variants: Array<{ title: string; inventory: number; sku: string | null; price: number | null }>
+  appeal_score: number | null
+  appeal_reason: string | null
 }
 
 export async function POST(
@@ -33,7 +35,7 @@ export async function POST(
     return NextResponse.json({ error: 'Submission not found' }, { status: 404 })
   }
 
-  // Pull existing products for style reference (names, types, tags, price ranges)
+  // Pull existing products for naming-style reference
   const { data: existingProducts } = await supabase
     .from('products')
     .select('title, product_type, category, tags, price')
@@ -48,33 +50,58 @@ export async function POST(
     )
     .join('\n')
 
+  // Pull REAL best-sellers (by units actually sold) — the benchmark for the
+  // "appeal" rating: how much a new design looks like what already sells.
+  const { data: soldItems } = await supabase
+    .from('order_items')
+    .select('title, quantity')
+    .limit(5000)
+
+  const salesByTitle = new Map<string, number>()
+  for (const it of soldItems || []) {
+    if (!it.title) continue
+    salesByTitle.set(it.title, (salesByTitle.get(it.title) || 0) + (it.quantity || 0))
+  }
+  const topSellers = [...salesByTitle.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([title, qty]) => `- ${title} — נמכרו ${qty} יח'`)
+    .join('\n')
+
   const systemPrompt = `אתה עוזר יצירת listings למוצרי חנות מקוונת של מצעים וטקסטיל (משי הום).
 המטרה: ליצור listing מוכן לפרסום ב-Shopify.
 
-דוגמאות למוצרים קיימים בחנות (סגנון השמות והמחירים):
+דוגמאות למוצרים קיימים בחנות (סגנון השמות):
 ${examples}
+
+רבי-המכר בפועל (לפי כמות שנמכרה — זה מדד ה"אטרקטיביות"):
+${topSellers || '(אין עדיין נתוני מכירות)'}
 
 כללים:
 1. שם המוצר בעברית, בסגנון הדוגמאות (למשל "קונטרסט לילה – סט מצעים פרמיום", "צל העלים – סט מצעים פרמיום").
 2. תיאור שיווקי קצר בעברית (2-4 משפטים), יוקרתי אבל טבעי.
-3. מחיר: אסטרטגיית התמחור של החנות — סט מצעים פרימיום רגיל = 79 ש"ח (נכנס למבצע "4 ב-219"). רק אם המוצר באמת יוקרתי במיוחד (כותנה/ז'קרד) השתמש ב-129 ש"ח. ברירת מחדל לסט מצעים: 79.
+3. מחיר: כל סטי המצעים באותה איכות (סאטן אל-קמט). לכן המחיר תמיד 79 ש"ח (נכנס למבצע "4 ב-219"). אל תשתמש ב-129 — תמחור פרימיום נעשה ידנית ע"י המנהל בלבד. price = 79 לסט מצעים.
 4. compare_at_price (אופציונלי) — רק אם יש היגיון להצגת הנחה.
 5. תגיות (tags) — מילות מפתח שיעזרו לחיפוש (למשל "מצעים", "סט פרימיום", "קיץ", צבעים מהתמונה וכו').
 6. product_type + category בדיוק כמו בדוגמאות (למשל "Bed Sheets").
 7. vendor: תמיד "משי טקסטיל".
 8. variants: זהה גדלים מהערות הספק (למשל 1.80, 1.60, 1.40). אם לא צוין — ברירת מחדל [{title:"1.80", inventory:0}, {title:"1.60", inventory:0}].
+9. appeal_score (1-10): כמה הדגם בתמונה נראה מבוקש/מסחרי בהשוואה לרבי-המכר למעלה. 10 = נראה בדיוק כמו הדגמים הכי נמכרים (הדפס בולט/נועז/מודרני שמושך עין). 1 = נראה חלש/דהוי/לא מסחרי. תשתמש בשיקול ויזואלי אמיתי לפי התמונה.
+10. appeal_reason: משפט קצר אחד בעברית שמסביר את הציון (למשל "הדפס פרחוני עשיר ובולט בסגנון המנצחים" או "צבעוניות חיוורת ושטוחה, פחות בולט").
 
 החזר JSON בלבד בפורמט הזה (ללא markdown, ללא הסברים):
 {
   "title": "string",
   "description": "string",
-  "price": number,
+  "price": 79,
   "compare_at_price": number | null,
   "tags": ["string"],
   "product_type": "string",
   "category": "string",
   "vendor": "משי טקסטיל",
-  "variants": [{"title": "string", "inventory": number, "sku": null, "price": null}]
+  "variants": [{"title": "string", "inventory": number, "sku": null, "price": null}],
+  "appeal_score": number,
+  "appeal_reason": "string"
 }`
 
   const userText = `הערות מהספק: ${submission.notes || '(אין הערות)'}
@@ -139,6 +166,19 @@ ${examples}
     if (submission.category) {
       listing.product_type = submission.category
       listing.category = submission.category
+    }
+
+    // Strategy: all bed-sheet sets are the same quality (satin) → always ₪79.
+    // ₪129 premium is a manual admin decision only.
+    if ((listing.category || '').toLowerCase().includes('bed sheet')) {
+      listing.price = 79
+    }
+
+    // Clamp appeal score to 1..10 (or null if the model omitted it)
+    if (typeof listing.appeal_score === 'number') {
+      listing.appeal_score = Math.max(1, Math.min(10, Math.round(listing.appeal_score)))
+    } else {
+      listing.appeal_score = null
     }
 
     return NextResponse.json({ listing })

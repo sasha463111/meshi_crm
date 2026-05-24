@@ -28,6 +28,7 @@ import {
   Image as ImageIcon,
   Plus,
   X,
+  Layers,
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -74,6 +75,8 @@ interface GeneratedListing {
   category: string
   vendor: string
   variants: Array<{ title: string; inventory: number; sku: string | null; price: number | null }>
+  appeal_score: number | null
+  appeal_reason: string | null
 }
 
 interface ChatMsg { role: 'user' | 'assistant'; content: string }
@@ -112,6 +115,17 @@ export default function AdminSubmissionsPage() {
   const [publishActive, setPublishActive] = useState(true)
   const [autoImages, setAutoImages] = useState(true)
   const [editingImageAction, setEditingImageAction] = useState<{ url: string; action: string } | null>(null)
+
+  // Bulk approve state
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [bulkAutoImages, setBulkAutoImages] = useState(true)
+  const [bulkProgress, setBulkProgress] = useState<{
+    total: number
+    done: number
+    current: string
+    errors: { title: string; error: string }[]
+    results: { title: string; appeal: number | null; reason: string | null }[]
+  } | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-submissions', statusFilter],
@@ -248,6 +262,8 @@ export default function AdminSubmissionsPage() {
         image_urls: Array.from(selectedImages),
         status: publishActive ? 'ACTIVE' : 'DRAFT',
         auto_images: autoImages,
+        appeal_score: listing.appeal_score,
+        appeal_reason: listing.appeal_reason,
       },
     })
   }
@@ -321,11 +337,81 @@ export default function AdminSubmissionsPage() {
   }
 
   const submissions = data?.submissions || []
+  const pendingSubmissions = submissions.filter((s) => s.status === 'pending')
+  const pendingCount = pendingSubmissions.length
+  const bulkDone = !!bulkProgress && bulkProgress.done >= bulkProgress.total
+
+  // Approve ALL pending submissions according to the pricing strategy.
+  // Runs client-side, one submission at a time (each generate+approve is its own
+  // request) so we never hit Vercel's 60s serverless limit.
+  const runBulkApprove = async () => {
+    if (pendingCount === 0 || (bulkProgress && !bulkDone)) return
+    setBulkConfirm(false)
+    setActionError(null)
+    const queue = [...pendingSubmissions]
+    const errors: { title: string; error: string }[] = []
+    const results: { title: string; appeal: number | null; reason: string | null }[] = []
+    setBulkProgress({ total: queue.length, done: 0, current: '', errors: [], results: [] })
+
+    for (const s of queue) {
+      setBulkProgress((prev) => (prev ? { ...prev, current: s.title } : prev))
+      try {
+        // 1) AI listing (applies strategy: ₪79 + appeal rating vs. best-sellers)
+        const genRes = await fetch(`/api/submissions/${s.id}/generate`, { method: 'POST' })
+        const genData = await genRes.json()
+        if (!genRes.ok || !genData.listing) throw new Error(genData.error || 'יצירת listing נכשלה')
+        const l = genData.listing as GeneratedListing
+
+        // 2) Create + publish in Shopify
+        const apprRes = await fetch(`/api/submissions/${s.id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: l.title,
+            description: l.description,
+            price: l.price,
+            compare_at_price: l.compare_at_price,
+            tags: l.tags,
+            product_type: l.product_type,
+            category: l.category,
+            vendor: l.vendor,
+            variants: l.variants,
+            image_urls: s.image_urls,
+            status: 'ACTIVE',
+            auto_images: bulkAutoImages,
+            appeal_score: l.appeal_score,
+            appeal_reason: l.appeal_reason,
+          }),
+        })
+        const apprData = await apprRes.json()
+        if (!apprRes.ok) throw new Error(apprData.error || 'יצירת המוצר נכשלה')
+        results.push({ title: l.title, appeal: l.appeal_score, reason: l.appeal_reason })
+      } catch (e) {
+        errors.push({ title: s.title, error: (e as Error).message })
+      }
+      setBulkProgress((prev) =>
+        prev ? { ...prev, done: prev.done + 1, errors: [...errors], results: [...results] } : prev
+      )
+    }
+
+    setBulkProgress((prev) => (prev ? { ...prev, current: '' } : prev))
+    queryClient.invalidateQueries({ queryKey: ['admin-submissions'] })
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-2xl font-bold">הצעות מוצרים מספקים</h1>
+        {pendingCount > 0 && (
+          <Button
+            onClick={() => setBulkConfirm(true)}
+            disabled={!!bulkProgress && !bulkDone}
+            className="bg-gradient-to-l from-purple-600 to-primary text-white"
+          >
+            <Layers className="size-4 me-1" />
+            אשר הכל לפי האסטרטגיה ({pendingCount})
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-1 rounded-lg border p-1 self-start w-fit flex-wrap">
@@ -597,6 +683,44 @@ export default function AdminSubmissionsPage() {
                   rows={4}
                 />
               </div>
+
+              {/* Appeal rating (how desirable the design looks vs. best-sellers) */}
+              {listing.appeal_score != null && (
+                <div className="rounded-lg border p-3 bg-purple-50/50">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium flex items-center gap-1.5">
+                      <Sparkles className="size-4 text-purple-600" />
+                      ציון אטרקטיביות (מול רבי-המכר)
+                    </Label>
+                    <span
+                      className={`text-lg font-bold ${
+                        listing.appeal_score >= 8
+                          ? 'text-green-600'
+                          : listing.appeal_score >= 5
+                            ? 'text-amber-600'
+                            : 'text-red-500'
+                      }`}
+                    >
+                      {listing.appeal_score}/10
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden mt-2">
+                    <div
+                      className={`h-full ${
+                        listing.appeal_score >= 8
+                          ? 'bg-green-500'
+                          : listing.appeal_score >= 5
+                            ? 'bg-amber-500'
+                            : 'bg-red-400'
+                      }`}
+                      style={{ width: `${listing.appeal_score * 10}%` }}
+                    />
+                  </div>
+                  {listing.appeal_reason && (
+                    <p className="text-xs text-muted-foreground mt-1.5">{listing.appeal_reason}</p>
+                  )}
+                </div>
+              )}
 
               {/* Promo tier quick-select (strategy) */}
               <div className="rounded-lg border p-3 bg-amber-50/50">
@@ -880,6 +1004,126 @@ export default function AdminSubmissionsPage() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk approve — confirm */}
+      <Dialog open={bulkConfirm} onOpenChange={setBulkConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Layers className="size-5 text-purple-600" />
+              אישור קבוצתי לפי האסטרטגיה
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>
+              הפעולה תיצור ב-Shopify <strong>{pendingCount} מוצרים</strong> מכל ההצעות הממתינות:
+            </p>
+            <ul className="list-disc pr-5 text-muted-foreground space-y-1">
+              <li>ה-AI ייצר לכל מוצר שם, תיאור ותגיות</li>
+              <li>תמחור לפי האסטרטגיה — סטי מצעים ב-₪79 (נכנסים למבצע 4 ב-219)</li>
+              <li>גדלים וקטגוריה בדיוק כפי שהספק הזין</li>
+              <li>המוצרים יפורסמו מיד בחנות (פעילים)</li>
+            </ul>
+            <div className="flex items-center justify-between rounded-lg border p-3 bg-primary/5">
+              <Label htmlFor="bulk-auto" className="text-sm">
+                צור אוטומטית רקע קרם + רקע חדר לכל מוצר
+              </Label>
+              <Switch id="bulk-auto" checked={bulkAutoImages} onCheckedChange={setBulkAutoImages} />
+            </div>
+            <p className="text-xs text-amber-700">
+              ⚠️ הפעולה אורכת כ-20–40 שניות למוצר. אל תסגור את הדף עד הסיום.
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setBulkConfirm(false)}>
+                ביטול
+              </Button>
+              <Button className="flex-1" onClick={runBulkApprove}>
+                <CheckCircle2 className="size-4 me-1" />
+                אשר הכל ({pendingCount})
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk approve — progress */}
+      <Dialog
+        open={!!bulkProgress}
+        onOpenChange={(v) => {
+          if (!v && bulkDone) setBulkProgress(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {bulkDone ? (
+                <CheckCircle2 className="size-5 text-green-600" />
+              ) : (
+                <Loader2 className="size-5 animate-spin text-purple-600" />
+              )}
+              {bulkDone ? 'האישור הקבוצתי הסתיים' : 'יוצר מוצרים...'}
+            </DialogTitle>
+          </DialogHeader>
+          {bulkProgress && (
+            <div className="space-y-3">
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}
+                />
+              </div>
+              <p className="text-sm font-medium">
+                {bulkProgress.done} / {bulkProgress.total}
+              </p>
+              {!bulkDone && bulkProgress.current && (
+                <p className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" />
+                  מעבד: {bulkProgress.current}
+                </p>
+              )}
+              {bulkProgress.errors.length > 0 && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs space-y-1 max-h-40 overflow-y-auto">
+                  <p className="font-semibold text-red-700">{bulkProgress.errors.length} נכשלו:</p>
+                  {bulkProgress.errors.map((e, i) => (
+                    <p key={i} className="text-red-600">
+                      • {e.title}: {e.error}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {bulkDone && bulkProgress.results.length > 0 && (
+                <div className="rounded-lg border p-3 space-y-1.5 max-h-52 overflow-y-auto">
+                  <p className="text-xs font-semibold flex items-center gap-1.5">
+                    <Sparkles className="size-3.5 text-purple-600" />
+                    מומלצים להבלטה (לפי אטרקטיביות)
+                  </p>
+                  {[...bulkProgress.results]
+                    .sort((a, b) => (b.appeal ?? 0) - (a.appeal ?? 0))
+                    .map((r, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate">{r.title}</span>
+                        {r.appeal != null && (
+                          <span
+                            className={`font-bold shrink-0 ${
+                              r.appeal >= 8 ? 'text-green-600' : r.appeal >= 5 ? 'text-amber-600' : 'text-red-500'
+                            }`}
+                          >
+                            {r.appeal}/10
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
+              {bulkDone && (
+                <Button className="w-full" onClick={() => setBulkProgress(null)}>
+                  סגור ({bulkProgress.total - bulkProgress.errors.length} הצליחו)
+                </Button>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
