@@ -32,12 +32,13 @@ export async function GET(request: NextRequest) {
 
   const { data: products } = await supabase
     .from('products')
-    .select('id, shopify_product_id, title, price, status, images, inventory_quantity, shopify_data, removal_requested, removal_requested_at, supplier_id, product_type')
+    .select('id, shopify_product_id, title, price, status, images, inventory_quantity, shopify_data, removal_requested, removal_requested_at, supplier_id, category')
     .order('title')
 
   // Extract variants/sizes from shopify_data
   const result = (products || []).map((p) => {
     const sd = p.shopify_data as Record<string, unknown> | null
+    const productType = (sd?.productType as string) || p.category || null
     const variantsRaw = (sd?.variants as { edges?: Array<{ node: ShopifyVariant }> } | undefined)?.edges || []
     const variants = variantsRaw
       .map((e) => e.node)
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
         ? variants.reduce((sum, v) => sum + (v.inventory || 0), 0)
         : p.inventory_quantity || 0,
       variants,
-      product_type: p.product_type,
+      product_type: productType,
       removal_requested: p.removal_requested || false,
       removal_requested_at: p.removal_requested_at,
     }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSupplierAuth } from '@/providers/supplier-auth-provider'
 import { formatCurrency } from '@/lib/utils/currency'
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import { Search, X, Upload, Trash2, RotateCcw, Package, ZoomIn, Loader2, AlertTriangle } from 'lucide-react'
+import { Search, X, Upload, Trash2, RotateCcw, Package, ZoomIn, Loader2, AlertTriangle, RefreshCw } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -44,6 +44,8 @@ export default function SupplierProductsPage() {
   const [removalTarget, setRemovalTarget] = useState<Product | null>(null)
   const [removalReason, setRemovalReason] = useState('')
   const [filter, setFilter] = useState<'all' | 'flagged'>('all')
+  const [syncResult, setSyncResult] = useState<string | null>(null)
+  const autoSyncDone = useRef(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['supplier-products', supplier?.supplier_id],
@@ -56,6 +58,39 @@ export default function SupplierProductsPage() {
       return res.json() as Promise<{ products: Product[] }>
     },
   })
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/sync-products', { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Sync failed')
+      return d
+    },
+    onSuccess: (d) => {
+      setSyncResult(`סונכרנו ${d.created || 0} חדשים, ${d.updated || 0} עודכנו`)
+      setTimeout(() => setSyncResult(null), 5000)
+      queryClient.invalidateQueries({ queryKey: ['supplier-products'] })
+    },
+    onError: (e) => {
+      setSyncResult(`שגיאה: ${(e as Error).message}`)
+      setTimeout(() => setSyncResult(null), 6000)
+    },
+  })
+
+  // Auto-sync products from Shopify on first load
+  useEffect(() => {
+    if (supplier?.access_token && !autoSyncDone.current) {
+      autoSyncDone.current = true
+      fetch('/api/sync-products', { method: 'POST' })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.created > 0 || d.updated > 0) {
+            queryClient.invalidateQueries({ queryKey: ['supplier-products'] })
+          }
+        })
+        .catch(() => {})
+    }
+  }, [supplier?.access_token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const removalMutation = useMutation({
     mutationFn: async ({ id, requested, reason }: { id: string; requested: boolean; reason?: string }) => {
@@ -91,10 +126,17 @@ export default function SupplierProductsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold">המוצרים שלי</h1>
-        <Button render={<Link href="/portal/submit" />} size="sm">
-          <Upload className="size-4 me-1" />
-          העלה מוצר חדש
-        </Button>
+        <div className="flex items-center gap-2">
+          {syncResult && <span className="text-xs text-muted-foreground">{syncResult}</span>}
+          <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+            {syncMutation.isPending ? <Loader2 className="size-4 me-1 animate-spin" /> : <RefreshCw className="size-4 me-1" />}
+            סנכרן מ-Shopify
+          </Button>
+          <Button render={<Link href="/portal/submit" />} size="sm">
+            <Upload className="size-4 me-1" />
+            העלה מוצר חדש
+          </Button>
+        </div>
       </div>
 
       {/* Search + filter */}
