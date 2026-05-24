@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Search, Package, X, Check, ListChecks, Grid3X3, Save, CheckSquare } from 'lucide-react'
+import { Search, Package, X, Check, ListChecks, Grid3X3, Save, CheckSquare, AlertTriangle, Trash2, Loader2, RotateCcw } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
 
@@ -39,6 +39,44 @@ export default function ProductsPage() {
         .select('*')
         .order('title')
       return data || []
+    },
+  })
+
+  const { data: removalRequests } = useQuery({
+    queryKey: ['product-removal-requests'],
+    queryFn: async () => {
+      const res = await fetch('/api/products/removal-requests')
+      if (!res.ok) return { products: [] }
+      return res.json() as Promise<{
+        products: Array<{
+          id: string
+          title: string
+          price: number
+          images: Array<{ url: string }> | null
+          removal_reason: string | null
+          removal_requested_at: string
+          suppliers: { name: string } | null
+        }>
+      }>
+    },
+  })
+
+  const processRemovalMutation = useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: 'archive' | 'dismiss' }) => {
+      const res = await fetch(`/api/products/${id}/process-removal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        throw new Error(d.error || 'Failed')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['product-removal-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
     },
   })
 
@@ -136,8 +174,72 @@ export default function ProductsPage() {
     updateCostMutation.mutate({ id: productId, cost })
   }
 
+  const pendingRemovals = removalRequests?.products || []
+
   return (
     <div className="space-y-4">
+      {/* Removal requests from suppliers */}
+      {pendingRemovals.length > 0 && (
+        <Card className="border-red-300 bg-red-50/50">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-red-700">
+              <AlertTriangle className="size-4" />
+              בקשות הסרה מספקים ({pendingRemovals.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {pendingRemovals.map((p) => (
+                <div key={p.id} className="flex items-center gap-3 rounded-lg border bg-background p-2.5">
+                  {p.images?.[0]?.url ? (
+                    <div className="relative size-12 rounded-md overflow-hidden shrink-0">
+                      <Image src={p.images[0].url} alt={p.title} fill className="object-cover" />
+                    </div>
+                  ) : (
+                    <div className="size-12 rounded-md bg-muted flex items-center justify-center shrink-0">
+                      <Package className="size-5 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{p.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {p.suppliers?.name}
+                      {p.removal_reason && ` · ${p.removal_reason}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="text-xs h-8"
+                      disabled={processRemovalMutation.isPending}
+                      onClick={() => processRemovalMutation.mutate({ id: p.id, action: 'archive' })}
+                    >
+                      {processRemovalMutation.isPending && processRemovalMutation.variables?.id === p.id ? (
+                        <Loader2 className="size-3 me-1 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3 me-1" />
+                      )}
+                      הסר מהאתר
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-8"
+                      disabled={processRemovalMutation.isPending}
+                      onClick={() => processRemovalMutation.mutate({ id: p.id, action: 'dismiss' })}
+                    >
+                      <RotateCcw className="size-3 me-1" />
+                      בטל בקשה
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl sm:text-2xl font-bold">מוצרים</h1>
