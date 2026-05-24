@@ -519,7 +519,7 @@ export default function AdminSubmissionsPage() {
                         {!isProcessing && (
                           <div className="mt-1 grid grid-cols-3 gap-1">
                             <button
-                              title="נקה טקסטים/לוגו"
+                              title="נקה טקסטים, עלונים ואביזרים — משאיר רק את המוצר"
                               onClick={() => {
                                 setEditingImageAction({ url, action: 'clean_text' })
                                 editImageMutation.mutate({ submissionId: reviewSubmission.id, imageUrl: url, action: 'clean_text' })
@@ -527,7 +527,7 @@ export default function AdminSubmissionsPage() {
                               className="rounded border bg-background hover:bg-muted px-1 py-1 text-[9px] font-medium flex flex-col items-center gap-0.5"
                             >
                               <Eraser className="size-3" />
-                              נקה טקסט
+                              נקה הכל
                             </button>
                             <button
                               title="רקע מקצועי"
