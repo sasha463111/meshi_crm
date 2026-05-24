@@ -27,7 +27,13 @@ const CATEGORY_IDS: Record<string, string> = {
   'Sofa Covers': 'gid://shopify/TaxonomyCategory/hg-3-57', // fallback (decor)
 }
 
-const ONLINE_STORE_PUBLICATION_ID = 'gid://shopify/Publication/319801491529'
+// Publish to all storefront channels. meshitextile.co.il is served by Lovable,
+// so the product must be published there (not just the default Online Store).
+const PUBLICATION_IDS = [
+  'gid://shopify/Publication/319801491529', // Online Store
+  'gid://shopify/Publication/319810175049', // Lovable (meshitextile.co.il)
+  'gid://shopify/Publication/320433619017', // Facebook & Instagram
+]
 const LOCATION_ID = 'gid://shopify/Location/112862625865'
 const DEFAULT_INVENTORY = 100
 
@@ -176,15 +182,15 @@ export async function createShopifyProduct(input: CreateProductInput): Promise<{
     }
   }
 
-  // Publish to the Online Store sales channel so it shows on the site
+  // Publish to all storefront channels (Online Store + Lovable + Facebook)
   if ((input.status || 'ACTIVE') === 'ACTIVE') {
     try {
       await shopifyGraphQL(PUBLISH_MUTATION, {
         id: newProduct.id,
-        input: [{ publicationId: ONLINE_STORE_PUBLICATION_ID }],
+        input: PUBLICATION_IDS.map((publicationId) => ({ publicationId })),
       })
     } catch (err) {
-      console.error('Publish to online store failed:', err)
+      console.error('Publish to channels failed:', err)
     }
   }
 
