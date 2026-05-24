@@ -157,8 +157,43 @@ export async function syncOrders(sinceDate?: string) {
           created++
         }
 
-        // Sync line items — upsert to preserve supplier_id and internal_status
+        // Sync line items — fetch ALL existing items for this order once, build a map
+        // keyed by shopify_line_item_id. This avoids .single() failing on duplicates
+        // (which previously caused exponential duplication on every sync).
         const lineItems = (order.lineItems as Record<string, { node: Record<string, unknown> }[]>).edges || []
+
+        const { data: existingItems } = await supabase
+          .from('order_items')
+          .select('id, shopify_line_item_id, supplier_id, internal_status')
+          .eq('order_id', orderId)
+
+        // Map line_item_id -> best existing row (prefer one with supplier_id)
+        const existingMap = new Map<string, { id: string; supplier_id: string | null; internal_status: string | null }>()
+        const seenIds = new Set<string>()
+        const duplicateIdsToDelete: string[] = []
+        for (const ex of existingItems || []) {
+          const key = ex.shopify_line_item_id || ''
+          if (!key) continue
+          const current = existingMap.get(key)
+          if (!current) {
+            existingMap.set(key, ex)
+          } else {
+            // Already have one — keep the one with supplier_id, delete the other
+            if (!current.supplier_id && ex.supplier_id) {
+              duplicateIdsToDelete.push(current.id)
+              existingMap.set(key, ex)
+            } else {
+              duplicateIdsToDelete.push(ex.id)
+            }
+          }
+        }
+
+        // Clean up any pre-existing duplicates
+        if (duplicateIdsToDelete.length > 0) {
+          await supabase.from('order_items').delete().in('id', duplicateIdsToDelete)
+        }
+
+        const shopifyLineItemIds = new Set<string>()
 
         for (const li of lineItems) {
           const item = li.node
@@ -166,13 +201,8 @@ export async function syncOrders(sinceDate?: string) {
           const totalItemPrice = (item.originalTotalSet as Record<string, Record<string, string>>).shopMoney
           const image = item.image as Record<string, string> | null
           const shopifyLineItemId = extractIdFromGid(item.id as string)
-
-          const { data: existingItem } = await supabase
-            .from('order_items')
-            .select('id')
-            .eq('order_id', orderId)
-            .eq('shopify_line_item_id', shopifyLineItemId)
-            .single()
+          shopifyLineItemIds.add(shopifyLineItemId)
+          seenIds.add(shopifyLineItemId)
 
           const itemData = {
             order_id: orderId,
@@ -185,6 +215,8 @@ export async function syncOrders(sinceDate?: string) {
             total_price: parseFloat(totalItemPrice.amount),
             image_url: image?.url || null,
           }
+
+          const existingItem = existingMap.get(shopifyLineItemId)
 
           if (existingItem) {
             // Update only Shopify fields, preserve supplier_id and internal_status
@@ -201,11 +233,19 @@ export async function syncOrders(sinceDate?: string) {
                 .eq('shopify_product_id', shopifyProductId)
                 .not('supplier_id', 'is', null)
                 .limit(1)
-                .single()
+                .maybeSingle()
               if (product?.supplier_id) supplierId = product.supplier_id
             }
             await supabase.from('order_items').insert({ ...itemData, supplier_id: supplierId })
           }
+        }
+
+        // Remove DB items whose line item no longer exists in Shopify (e.g. removed/edited order)
+        const staleIds = (existingItems || [])
+          .filter((ex) => ex.shopify_line_item_id && !shopifyLineItemIds.has(ex.shopify_line_item_id) && !duplicateIdsToDelete.includes(ex.id))
+          .map((ex) => ex.id)
+        if (staleIds.length > 0) {
+          await supabase.from('order_items').delete().in('id', staleIds)
         }
       }
 
