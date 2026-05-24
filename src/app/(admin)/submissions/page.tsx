@@ -185,7 +185,12 @@ export default function AdminSubmissionsPage() {
       }
     },
     onError: (error) => {
-      setActionError(`עריכת תמונה נכשלה: ${(error as Error).message}`)
+      const msg = (error as Error).message
+      if (msg.includes('429') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('billing')) {
+        setActionError('עריכת תמונות דורשת הפעלת חיוב (billing) ב-Gemini. ראה ההוראות שקיבלת.')
+      } else {
+        setActionError(`עריכת תמונה נכשלה: ${msg}`)
+      }
       setEditingImageAction(null)
     },
   })
@@ -493,7 +498,7 @@ export default function AdminSubmissionsPage() {
                     const isSelected = selectedImages.has(url)
                     const isProcessing = editImageMutation.isPending && editingImageAction?.url === url
                     return (
-                      <div key={url} className="relative group">
+                      <div key={url} className="relative">
                         <div
                           className={`relative aspect-square rounded-md overflow-hidden border-2 cursor-pointer ${isSelected ? 'border-primary' : 'border-transparent opacity-50'}`}
                           onClick={() => toggleImageSelection(url)}
@@ -505,22 +510,24 @@ export default function AdminSubmissionsPage() {
                             </div>
                           )}
                           {isProcessing && (
-                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1">
                               <Loader2 className="size-5 animate-spin text-white" />
+                              <span className="text-[9px] text-white">מעבד...</span>
                             </div>
                           )}
                         </div>
                         {!isProcessing && (
-                          <div className="absolute bottom-1 inset-x-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="mt-1 grid grid-cols-3 gap-1">
                             <button
-                              title="נקה טקסטים"
+                              title="נקה טקסטים/לוגו"
                               onClick={() => {
                                 setEditingImageAction({ url, action: 'clean_text' })
                                 editImageMutation.mutate({ submissionId: reviewSubmission.id, imageUrl: url, action: 'clean_text' })
                               }}
-                              className="flex-1 bg-white/90 hover:bg-white rounded px-1 py-0.5 text-[10px] font-medium text-gray-800"
+                              className="rounded border bg-background hover:bg-muted px-1 py-1 text-[9px] font-medium flex flex-col items-center gap-0.5"
                             >
-                              <Eraser className="size-3 inline" />
+                              <Eraser className="size-3" />
+                              נקה טקסט
                             </button>
                             <button
                               title="רקע מקצועי"
@@ -528,19 +535,21 @@ export default function AdminSubmissionsPage() {
                                 setEditingImageAction({ url, action: 'clean_background' })
                                 editImageMutation.mutate({ submissionId: reviewSubmission.id, imageUrl: url, action: 'clean_background' })
                               }}
-                              className="flex-1 bg-white/90 hover:bg-white rounded px-1 py-0.5 text-[10px] font-medium text-gray-800"
+                              className="rounded border bg-background hover:bg-muted px-1 py-1 text-[9px] font-medium flex flex-col items-center gap-0.5"
                             >
-                              <ImageIcon className="size-3 inline" />
+                              <ImageIcon className="size-3" />
+                              רקע
                             </button>
                             <button
-                              title="שיפור"
+                              title="שיפור איכות"
                               onClick={() => {
                                 setEditingImageAction({ url, action: 'enhance' })
                                 editImageMutation.mutate({ submissionId: reviewSubmission.id, imageUrl: url, action: 'enhance' })
                               }}
-                              className="flex-1 bg-white/90 hover:bg-white rounded px-1 py-0.5 text-[10px] font-medium text-gray-800"
+                              className="rounded border bg-background hover:bg-muted px-1 py-1 text-[9px] font-medium flex flex-col items-center gap-0.5"
                             >
-                              <Sparkles className="size-3 inline" />
+                              <Sparkles className="size-3" />
+                              שיפור
                             </button>
                           </div>
                         )}
