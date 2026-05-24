@@ -76,10 +76,15 @@ export async function editProductImage(
     return null
   }
 
-  // Normalise to an exact 4:5 frame (1080x1350) so it always fills the card —
-  // any padding uses #EAE9E6 so no white ever appears.
+  // Normalise to an exact 4:5 frame (1080x1350). For the clean studio shot we
+  // auto-crop the uniform #EAE9E6 margins first so the product fills the frame
+  // (no floating). Then cover-fit so the frame is always completely filled.
   const rawBuffer = Buffer.from(inlineData.data, 'base64')
-  const editedBuffer = await sharp(rawBuffer)
+  let sourceForFrame = rawBuffer
+  if (action === 'white_background') {
+    sourceForFrame = await autoCropBackground(rawBuffer)
+  }
+  const editedBuffer = await sharp(sourceForFrame)
     .resize(FRAME_W, FRAME_H, { fit: 'cover', position: 'centre', background: FRAME_BG })
     .jpeg({ quality: 92 })
     .toBuffer()
@@ -94,4 +99,45 @@ export async function editProductImage(
   if (uploadErr) throw new Error('Upload failed: ' + uploadErr.message)
 
   return supabase.storage.from('product-submissions').getPublicUrl(path).data.publicUrl
+}
+
+// Crop away the uniform background margins so the product fills the frame.
+// Uses the top-left pixel as the background reference colour.
+async function autoCropBackground(buffer: Buffer): Promise<Buffer> {
+  try {
+    const img = sharp(buffer)
+    const meta = await img.metadata()
+    const width = meta.width || 0
+    const height = meta.height || 0
+    if (!width || !height) return buffer
+
+    const raw = await sharp(buffer).removeAlpha().raw().toBuffer()
+    const ch = 3
+    const bg = [raw[0], raw[1], raw[2]]
+    const thr = 22
+    let minX = width, minY = height, maxX = 0, maxY = 0
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        const i = (y * width + x) * ch
+        const d = Math.abs(raw[i] - bg[0]) + Math.abs(raw[i + 1] - bg[1]) + Math.abs(raw[i + 2] - bg[2])
+        if (d > thr) {
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+          if (y < minY) minY = y
+          if (y > maxY) maxY = y
+        }
+      }
+    }
+    if (maxX <= minX || maxY <= minY) return buffer // nothing detected
+    const pad = Math.round(Math.max(width, height) * 0.02)
+    minX = Math.max(0, minX - pad)
+    minY = Math.max(0, minY - pad)
+    maxX = Math.min(width, maxX + pad)
+    maxY = Math.min(height, maxY + pad)
+    return await sharp(buffer)
+      .extract({ left: minX, top: minY, width: maxX - minX, height: maxY - minY })
+      .toBuffer()
+  } catch {
+    return buffer
+  }
 }
