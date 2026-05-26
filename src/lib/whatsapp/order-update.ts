@@ -41,7 +41,9 @@ async function loadTemplates(): Promise<Record<number, string>> {
  * Dedup keys ensure each order gets each message at most once.
  */
 export async function scanAndEnqueueOrderUpdates(): Promise<{ scanned: number; enqueued: number }> {
-  const orders = await getRecentOrders(20)
+  // Use the default 24h lookback so cron gaps never lose an order; dedup keys
+  // make a wide window idempotent.
+  const orders = await getRecentOrders()
   const tmpl = await loadTemplates()
   const now = new Date()
   let enqueued = 0
