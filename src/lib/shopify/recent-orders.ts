@@ -49,10 +49,11 @@ const QUERY = `
 
 /**
  * Recent orders (newest first), with phone + fulfillment info for WhatsApp updates.
- * Wide default lookback (6 h) so cron gaps from GitHub Actions don't drop orders;
- * dedup keys on the queue prevent re-sending an already-confirmed order.
+ * 24 h default lookback to survive long cron gaps (GitHub Actions schedules can
+ * slip by hours); unique dedup keys on the queue prevent re-sending an already
+ * confirmed order so a wide window is idempotent.
  */
-export async function getRecentOrders(lookbackMinutes = 360): Promise<RecentOrder[]> {
+export async function getRecentOrders(lookbackMinutes = 1440): Promise<RecentOrder[]> {
   const data = await shopifyGraphQL<OrdersResponse>(QUERY, {})
   const cutoff = Date.now() - lookbackMinutes * 60_000
   const out: RecentOrder[] = []
