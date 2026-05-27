@@ -118,11 +118,30 @@ async function gatherData(): Promise<SummaryData> {
     .in('to_status', ['shipped', 'fulfilled'])
   const fulfilledToday = new Set((fulLogs || []).map((l) => l.order_item_id)).size
 
-  // Open queue in the supplier portal: items still waiting to be shipped.
-  const { count: pendingFulfillment } = await supabase
+  // Open queue in the supplier portal: count ORDERS (not items) whose worst-status
+  // item is still "pending" — exactly how the portal counts (an order with any
+  // cancelled item resolves to cancelled; otherwise the order's status = the
+  // lowest in [cancelled, pending, packed, shipped, delivered]).
+  const { data: allItems } = await supabase
     .from('order_items')
-    .select('id', { count: 'exact', head: true })
-    .eq('internal_status', 'pending')
+    .select('order_id, internal_status')
+  const byOrder = new Map<string, Set<string>>()
+  for (const it of allItems || []) {
+    const s = byOrder.get(it.order_id) || new Set<string>()
+    s.add(it.internal_status || 'pending')
+    byOrder.set(it.order_id, s)
+  }
+  const PRIORITY = ['cancelled', 'pending', 'packed', 'shipped', 'delivered']
+  let pendingFulfillment = 0
+  for (const statuses of byOrder.values()) {
+    if (statuses.has('cancelled')) continue
+    let worst = PRIORITY.length
+    for (const s of statuses) {
+      const idx = PRIORITY.indexOf(s)
+      if (idx >= 0 && idx < worst) worst = idx
+    }
+    if (PRIORITY[worst] === 'pending') pendingFulfillment++
+  }
 
   // Latest Clarity snapshot
   const { data: clarity } = await supabase
@@ -140,7 +159,7 @@ async function gatherData(): Promise<SummaryData> {
     abandonedToday: acCount ?? 0,
     recoveries,
     fulfilledToday,
-    pendingFulfillment: pendingFulfillment ?? 0,
+    pendingFulfillment,
     clarity,
   }
 }
