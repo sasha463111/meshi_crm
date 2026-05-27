@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { normalizeIlPhone } from './flow'
+import { getClarityLiveInsights } from '@/lib/clarity/client'
 
 const EVOLUTION_URL = process.env.EVOLUTION_API_URL!
 const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY!
@@ -44,6 +45,37 @@ interface ClarityRow {
   bounce_rate: number | null
   quick_backs: number | null
   date: string | null
+}
+
+interface ClarityMetric {
+  metricName: string
+  information: Record<string, unknown>[]
+}
+
+/** Pull fresh "yesterday" metrics directly from Clarity (numOfDays:1). */
+async function fetchClarityYesterday(): Promise<ClarityRow | null> {
+  try {
+    const insights = (await getClarityLiveInsights({ numOfDays: 1 })) as ClarityMetric[]
+    const find = (n: string) =>
+      insights.find((m) => m.metricName === n)?.information?.[0] as Record<string, unknown> | undefined
+    const traffic = find('Traffic')
+    const dead = find('DeadClickCount')
+    const rage = find('RageClickCount')
+    const quick = find('QuickbackClick')
+    // Compute "yesterday" date in IL
+    const y = new Date(Date.now() - 86_400_000)
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(y)
+    return {
+      date: ymd,
+      total_sessions: Number(traffic?.totalSessionCount) || 0,
+      dead_clicks: Number(dead?.subTotal) || 0,
+      rage_clicks: Number(rage?.subTotal) || 0,
+      quick_backs: Number(quick?.subTotal) || 0,
+      bounce_rate: Number(quick?.sessionsWithMetricPercentage) || 0,
+    }
+  } catch {
+    return null
+  }
 }
 
 interface SummaryData {
@@ -143,13 +175,17 @@ async function gatherData(): Promise<SummaryData> {
     if (PRIORITY[worst] === 'pending') pendingFulfillment++
   }
 
-  // Latest Clarity snapshot
-  const { data: clarity } = await supabase
-    .from('clarity_snapshots')
-    .select('date, total_sessions, rage_clicks, dead_clicks, bounce_rate, quick_backs')
-    .order('date', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  // Clarity: fresh "yesterday" pull from the live API (with snapshot fallback).
+  let clarity: ClarityRow | null = await fetchClarityYesterday()
+  if (!clarity) {
+    const { data } = await supabase
+      .from('clarity_snapshots')
+      .select('date, total_sessions, rage_clicks, dead_clicks, bounce_rate, quick_backs')
+      .order('date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    clarity = data
+  }
 
   return {
     orderCount,
