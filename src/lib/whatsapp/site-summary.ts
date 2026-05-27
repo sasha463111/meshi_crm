@@ -54,6 +54,7 @@ interface SummaryData {
   abandonedToday: number
   recoveries: number
   fulfilledToday: number
+  pendingFulfillment: number
   clarity: ClarityRow | null
 }
 
@@ -117,6 +118,12 @@ async function gatherData(): Promise<SummaryData> {
     .in('to_status', ['shipped', 'fulfilled'])
   const fulfilledToday = new Set((fulLogs || []).map((l) => l.order_item_id)).size
 
+  // Open queue in the supplier portal: items still waiting to be shipped.
+  const { count: pendingFulfillment } = await supabase
+    .from('order_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('internal_status', 'pending')
+
   // Latest Clarity snapshot
   const { data: clarity } = await supabase
     .from('clarity_snapshots')
@@ -133,6 +140,7 @@ async function gatherData(): Promise<SummaryData> {
     abandonedToday: acCount ?? 0,
     recoveries,
     fulfilledToday,
+    pendingFulfillment: pendingFulfillment ?? 0,
     clarity,
   }
 }
@@ -144,7 +152,8 @@ async function aiInsight(d: SummaryData): Promise<string> {
 - הכנסות: ${fmtMoney(d.revenue)} (אתמול באותו זמן: ${fmtMoney(d.yRevenue)})
 - עגלות נטושות שזוהו: ${d.abandonedToday}
 - שחזורי עגלה (לקוחות שנטשו וקנו): ${d.recoveries}
-- משלוחים שיצאו דרך הספקים: ${d.fulfilledToday}
+- משלוחים שיצאו היום: ${d.fulfilledToday}
+- הזמנות ממתינות בתור הספק: ${d.pendingFulfillment}
 - Clarity ליום ${d.clarity?.date}: ${d.clarity?.total_sessions || 0} סשנים | ${d.clarity?.dead_clicks || 0} dead-clicks | ${d.clarity?.rage_clicks || 0} rage-clicks | ${d.clarity?.quick_backs || 0} quick-backs | bounce ${d.clarity?.bounce_rate ?? '-'}
 
 החזר תובנה אחת קצרה בעברית (משפט אחד עד שניים) — אם רואים אנומליה/באג חשוד, צייני אותו. אחרת ציין המלצה ספציפית להעלאת הזמנות לפי הנתונים. תהיה ישיר, בלי כותרות.`
@@ -194,7 +203,8 @@ export async function buildSiteSummary(): Promise<BuiltSummary> {
     `💰 הכנסות: *${fmtMoney(data.revenue)}*${deltaArrow(data.revenue, data.yRevenue)}\n` +
     `🛍 עגלות נטושות שזוהו: ${data.abandonedToday}\n` +
     `🎯 שחזורי עגלה: ${data.recoveries}\n` +
-    `📦 משלוחים שיצאו (ספקים): ${data.fulfilledToday}\n` +
+    `📦 נשלחו היום: ${data.fulfilledToday}\n` +
+    `⏳ ממתינות בתור הספק: ${data.pendingFulfillment}\n` +
     (data.clarity
       ? `👀 Clarity (${data.clarity.date}): ${data.clarity.total_sessions ?? '-'} סשנים · ${
           data.clarity.dead_clicks ?? '-'
