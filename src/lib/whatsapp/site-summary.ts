@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { normalizeIlPhone } from './flow'
 import { getClarityLiveInsights } from '@/lib/clarity/client'
+import { shopifyGraphQL } from '@/lib/shopify/client'
 
 const EVOLUTION_URL = process.env.EVOLUTION_API_URL!
 const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY!
@@ -83,7 +84,10 @@ interface SummaryData {
   revenue: number
   yOrderCount: number
   yRevenue: number
+  ordersLast3h: number
+  revenueLast3h: number
   abandonedToday: number
+  abandonedLast3h: number
   recoveries: number
   fulfilledToday: number
   pendingFulfillment: number
@@ -97,38 +101,49 @@ async function gatherData(): Promise<SummaryData> {
   const now = new Date()
   const elapsedMs = now.getTime() - start.getTime()
 
-  // Today's orders (since IL midnight)
-  const { data: orders } = await supabase
-    .from('orders')
-    .select('id, total, customer_phone')
-    .gte('order_date', startIso)
-
-  const orderCount = orders?.length ?? 0
-  const revenue = (orders || []).reduce((s, o) => s + Number(o.total || 0), 0)
-
-  // Yesterday's same window (e.g. yesterday from midnight to "now-time")
+  // Orders direct from Shopify — never depends on a sync job.
+  const last3hStart = new Date(now.getTime() - 3 * 3600_000)
   const yStart = new Date(start.getTime() - 86_400_000)
   const yEnd = new Date(yStart.getTime() + elapsedMs)
-  const { data: yOrders } = await supabase
-    .from('orders')
-    .select('id, total')
-    .gte('order_date', yStart.toISOString())
-    .lt('order_date', yEnd.toISOString())
-  const yOrderCount = yOrders?.length ?? 0
-  const yRevenue = (yOrders || []).reduce((s, o) => s + Number(o.total || 0), 0)
+  const ordersResp = await shopifyGraphQL<{
+    orders: { edges: Array<{ node: { createdAt: string; totalPriceSet: { shopMoney: { amount: string } }; phone: string | null; customer: { phone: string | null } | null; shippingAddress: { phone: string | null } | null } }> }
+  }>(
+    `query { orders(first: 100, sortKey: CREATED_AT, reverse: true) {
+      edges { node { createdAt totalPriceSet { shopMoney { amount } } phone customer { phone } shippingAddress { phone } } }
+    } }`,
+    {}
+  ).catch(() => ({ orders: { edges: [] } }))
+  const allOrders = ordersResp.orders?.edges.map((e) => e.node) || []
+  const todayOrders = allOrders.filter((o) => new Date(o.createdAt) >= start)
+  const yOrders = allOrders.filter((o) => {
+    const t = new Date(o.createdAt).getTime()
+    return t >= yStart.getTime() && t < yEnd.getTime()
+  })
+  const last3hOrders = allOrders.filter((o) => new Date(o.createdAt) >= last3hStart)
 
-  // Abandoned carts today (queued reminders = a reliable proxy)
-  const { count: acCount } = await supabase
-    .from('whatsapp_flow_jobs')
-    .select('id', { count: 'exact', head: true })
-    .eq('flow', 'abandoned_cart')
-    .eq('step', 1)
-    .gte('created_at', startIso)
+  const orderCount = todayOrders.length
+  const revenue = todayOrders.reduce((s, o) => s + Number(o.totalPriceSet?.shopMoney?.amount || 0), 0)
+  const yOrderCount = yOrders.length
+  const yRevenue = yOrders.reduce((s, o) => s + Number(o.totalPriceSet?.shopMoney?.amount || 0), 0)
+  const ordersLast3h = last3hOrders.length
+  const revenueLast3h = last3hOrders.reduce((s, o) => s + Number(o.totalPriceSet?.shopMoney?.amount || 0), 0)
 
-  // Recoveries: today's order phones that appear in abandoned-cart jobs from
-  // the last 7 days (approximation of "abandoned → recovered").
+  // Abandoned carts direct from Shopify (count ALL of them, even ones without
+  // phone — gives the real picture, not just the WhatsApp-eligible ones).
+  const acResp = await shopifyGraphQL<{
+    abandonedCheckouts: { edges: Array<{ node: { createdAt: string } }> }
+  }>(
+    `query { abandonedCheckouts(first: 100, sortKey: CREATED_AT, reverse: true) { edges { node { createdAt } } } }`,
+    {}
+  ).catch(() => ({ abandonedCheckouts: { edges: [] } }))
+  const allAbandoned = acResp.abandonedCheckouts?.edges.map((e) => e.node) || []
+  const abandonedToday = allAbandoned.filter((a) => new Date(a.createdAt) >= start).length
+  const abandonedLast3h = allAbandoned.filter((a) => new Date(a.createdAt) >= last3hStart).length
+
+  // Recoveries: today's order phones (any addr field) that appear in
+  // abandoned-cart jobs from the last 7 days = "abandoned → recovered".
   let recoveries = 0
-  if (orders && orders.length > 0) {
+  if (todayOrders.length > 0) {
     const since = new Date(Date.now() - 7 * 86_400_000).toISOString()
     const { data: acJobs } = await supabase
       .from('whatsapp_flow_jobs')
@@ -136,8 +151,9 @@ async function gatherData(): Promise<SummaryData> {
       .eq('flow', 'abandoned_cart')
       .gte('created_at', since)
     const acPhones = new Set((acJobs || []).map((j) => j.phone))
-    for (const o of orders) {
-      const norm = normalizeIlPhone(o.customer_phone)
+    for (const o of todayOrders) {
+      const raw = o.phone || o.customer?.phone || o.shippingAddress?.phone
+      const norm = normalizeIlPhone(raw)
       if (norm && acPhones.has(norm)) recoveries++
     }
   }
@@ -192,7 +208,10 @@ async function gatherData(): Promise<SummaryData> {
     revenue,
     yOrderCount,
     yRevenue,
-    abandonedToday: acCount ?? 0,
+    ordersLast3h,
+    revenueLast3h,
+    abandonedToday,
+    abandonedLast3h,
     recoveries,
     fulfilledToday,
     pendingFulfillment,
@@ -205,7 +224,8 @@ async function aiInsight(d: SummaryData): Promise<string> {
   const prompt = `אתה אנליסט עסקי לחנות איקומרס מצעים (משי טקסטיל). נתוני היום עד עכשיו:
 - הזמנות: ${d.orderCount} (אתמול באותו זמן: ${d.yOrderCount})
 - הכנסות: ${fmtMoney(d.revenue)} (אתמול באותו זמן: ${fmtMoney(d.yRevenue)})
-- עגלות נטושות שזוהו: ${d.abandonedToday}
+- ב-3 שעות האחרונות: ${d.ordersLast3h} הזמנות (${fmtMoney(d.revenueLast3h)}), ${d.abandonedLast3h} נטישות עגלה
+- עגלות נטושות היום (סה"כ): ${d.abandonedToday}
 - שחזורי עגלה (לקוחות שנטשו וקנו): ${d.recoveries}
 - משלוחים שיצאו היום: ${d.fulfilledToday}
 - הזמנות ממתינות בתור הספק: ${d.pendingFulfillment}
@@ -256,7 +276,8 @@ export async function buildSiteSummary(): Promise<BuiltSummary> {
     `\n` +
     `🛒 הזמנות היום: *${data.orderCount}*${deltaArrow(data.orderCount, data.yOrderCount)}\n` +
     `💰 הכנסות: *${fmtMoney(data.revenue)}*${deltaArrow(data.revenue, data.yRevenue)}\n` +
-    `🛍 עגלות נטושות שזוהו: ${data.abandonedToday}\n` +
+    `\n*ב-3 השעות האחרונות:* ${data.ordersLast3h} הזמנות (${fmtMoney(data.revenueLast3h)}) · ${data.abandonedLast3h} נטישות\n\n` +
+    `🛍 נטישות עגלה היום: ${data.abandonedToday}\n` +
     `🎯 שחזורי עגלה: ${data.recoveries}\n` +
     `📦 נשלחו היום: ${data.fulfilledToday}\n` +
     `⏳ ממתינות בתור הספק: ${data.pendingFulfillment}\n` +
