@@ -79,6 +79,46 @@ async function fetchClarityYesterday(): Promise<ClarityRow | null> {
   }
 }
 
+interface UrlBreakdown {
+  url: string
+  count: number
+}
+
+/** Per-URL breakdown of friction metrics (so the AI can identify a specific page). */
+async function fetchClarityUrlBreakdown(): Promise<{
+  deadByUrl: UrlBreakdown[]
+  rageByUrl: UrlBreakdown[]
+  quickbackByUrl: UrlBreakdown[]
+  popularPages: UrlBreakdown[]
+}> {
+  try {
+    const insights = (await getClarityLiveInsights({
+      numOfDays: 1,
+      dimension1: 'URL',
+    })) as ClarityMetric[]
+    const top = (name: string): UrlBreakdown[] => {
+      const metric = insights.find((m) => m.metricName === name)
+      if (!metric?.information) return []
+      return metric.information
+        .map((row: Record<string, unknown>) => ({
+          url: String(row.URL || row.url || ''),
+          count: Number(row.subTotal || row.visitsCount || 0),
+        }))
+        .filter((r) => r.url)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+    }
+    return {
+      deadByUrl: top('DeadClickCount'),
+      rageByUrl: top('RageClickCount'),
+      quickbackByUrl: top('QuickbackClick'),
+      popularPages: top('PopularPages'),
+    }
+  } catch {
+    return { deadByUrl: [], rageByUrl: [], quickbackByUrl: [], popularPages: [] }
+  }
+}
+
 interface SummaryData {
   orderCount: number
   revenue: number
@@ -234,19 +274,47 @@ async function gatherData(): Promise<SummaryData> {
   }
 }
 
-async function aiInsight(d: SummaryData): Promise<string> {
-  if (!ANTHROPIC_API_KEY) return ''
-  const prompt = `אתה אנליסט עסקי לחנות איקומרס מצעים (משי טקסטיל). נתוני היום עד עכשיו:
+interface AIInsight {
+  insight: string
+  actionPrompt: string | null // a copy-paste Lovable prompt, only when 10/10 confident
+}
+
+async function aiInsight(d: SummaryData, breakdown: Awaited<ReturnType<typeof fetchClarityUrlBreakdown>>): Promise<AIInsight> {
+  if (!ANTHROPIC_API_KEY) return { insight: '', actionPrompt: null }
+  const fmtBreakdown = (rows: UrlBreakdown[]) =>
+    rows.length === 0 ? '(אין נתונים)' : rows.map((r) => `${r.url} → ${r.count}`).join(' | ')
+  const prompt = `אתה אנליסט בכיר של חנות איקומרס מצעים (משי טקסטיל) עם רף סף גבוה מאוד למסקנות.
+
+נתוני היום עד עכשיו:
 - הזמנות: ${d.orderCount} (אתמול באותו זמן: ${d.yOrderCount})
 - הכנסות: ${fmtMoney(d.revenue)} (אתמול באותו זמן: ${fmtMoney(d.yRevenue)})
-- ב-3 שעות האחרונות: ${d.ordersLast3h} הזמנות (${fmtMoney(d.revenueLast3h)}), ${d.abandonedLast3h} נטישות עגלה
-- עגלות נטושות היום (סה"כ): ${d.abandonedToday}
-- שחזורי עגלה (לקוחות שנטשו וקנו): ${d.recoveries}
+- ב-3 שעות אחרונות: ${d.ordersLast3h} הזמנות (${fmtMoney(d.revenueLast3h)}), ${d.abandonedLast3h} נטישות
+- נטישות עגלה היום (סה"כ): ${d.abandonedToday}
+- שחזורי עגלה: ${d.recoveries}
 - משלוחים שיצאו היום: ${d.fulfilledToday}
 - הזמנות ממתינות בתור הספק: ${d.pendingFulfillment}
-- Clarity ליום ${d.clarity?.date}: ${d.clarity?.total_sessions || 0} סשנים | ${d.clarity?.dead_clicks || 0} dead-clicks | ${d.clarity?.rage_clicks || 0} rage-clicks | ${d.clarity?.quick_backs || 0} quick-backs | bounce ${d.clarity?.bounce_rate ?? '-'}
 
-החזר תובנה אחת קצרה בעברית (משפט אחד עד שניים) — אם רואים אנומליה/באג חשוד, צייני אותו. אחרת ציין המלצה ספציפית להעלאת הזמנות לפי הנתונים. תהיה ישיר, בלי כותרות.`
+Clarity ליום ${d.clarity?.date}: ${d.clarity?.total_sessions || 0} סשנים | ${d.clarity?.dead_clicks || 0} dead-clicks | ${d.clarity?.rage_clicks || 0} rage-clicks | ${d.clarity?.quick_backs || 0} quick-backs | bounce ${d.clarity?.bounce_rate ?? '-'}
+
+פילוח Clarity לפי דף (top 5 לכל מטריקה):
+- Dead-clicks: ${fmtBreakdown(breakdown.deadByUrl)}
+- Rage-clicks: ${fmtBreakdown(breakdown.rageByUrl)}
+- Quick-backs: ${fmtBreakdown(breakdown.quickbackByUrl)}
+- Popular pages: ${fmtBreakdown(breakdown.popularPages)}
+
+---
+
+החזר תשובה ב-JSON בלבד (ללא markdown, ללא הסברים נוספים), בפורמט:
+{
+  "insight": "משפט אחד-שניים בעברית: אנומליה/באג חשוד או המלצה ספציפית להעלאת הזמנות",
+  "actionPrompt": null או טקסט פרומפט מוכן באנגלית להעתקה ל-Lovable Chat
+}
+
+חוקי ה-actionPrompt — כלל ברזל:
+- שים שם פרומפט **רק אם אתה בטוח 10/10** שיש בעיה ממוקדת ופתירה (לדוגמה: dead-click ספציפי במספרים גבוהים בדף יחיד, פס תקלה ברור).
+- ברוב המקרים החזר null — אל תמציא, אל תהמר.
+- אם כן יש פרומפט: 2-4 משפטים באנגלית, ממוקד-מובייל, מציין את הדף הספציפי + מה לתקן + איך לוודא שהתיקון עבד. אל תיתן רעיונות כלליים.
+- אל תכניס דברים שכבר תוקנו (אם המספרים יורדים → סימן שתוקן).`
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -257,15 +325,26 @@ async function aiInsight(d: SummaryData): Promise<string> {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 220,
+        max_tokens: 700,
         messages: [{ role: 'user', content: prompt }],
       }),
     })
-    if (!res.ok) return ''
+    if (!res.ok) return { insight: '', actionPrompt: null }
     const j = await res.json()
-    return (j?.content?.[0]?.text || '').trim()
+    const raw = (j?.content?.[0]?.text || '').trim()
+    const match = raw.match(/\{[\s\S]*\}/)
+    if (!match) return { insight: raw, actionPrompt: null }
+    try {
+      const parsed = JSON.parse(match[0])
+      return {
+        insight: String(parsed.insight || '').trim(),
+        actionPrompt: parsed.actionPrompt ? String(parsed.actionPrompt).trim() : null,
+      }
+    } catch {
+      return { insight: raw, actionPrompt: null }
+    }
   } catch {
-    return ''
+    return { insight: '', actionPrompt: null }
   }
 }
 
@@ -283,8 +362,8 @@ export interface BuiltSummary {
 }
 
 export async function buildSiteSummary(): Promise<BuiltSummary> {
-  const data = await gatherData()
-  const insight = await aiInsight(data)
+  const [data, breakdown] = await Promise.all([gatherData(), fetchClarityUrlBreakdown()])
+  const { insight, actionPrompt } = await aiInsight(data, breakdown)
 
   const text =
     `📊 *סיכום אתר — ${ilHour()}*\n` +
@@ -301,7 +380,10 @@ export async function buildSiteSummary(): Promise<BuiltSummary> {
           data.clarity.dead_clicks ?? '-'
         } dead · ${data.clarity.rage_clicks ?? '-'} rage · ${data.clarity.quick_backs ?? '-'} quick-back\n`
       : '') +
-    (insight ? `\n💡 ${insight}` : '')
+    (insight ? `\n💡 ${insight}` : '') +
+    (actionPrompt
+      ? `\n\n🔧 *פעולה מומלצת (10/10) — פרומפט מוכן ל-Lovable:*\n\`\`\`\n${actionPrompt}\n\`\`\``
+      : '')
 
   return { text, data }
 }
