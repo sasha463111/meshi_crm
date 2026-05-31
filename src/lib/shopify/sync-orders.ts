@@ -39,8 +39,8 @@ const ORDERS_QUERY = `
                 originalUnitPriceSet { shopMoney { amount } }
                 originalTotalSet { shopMoney { amount } }
                 image { url altText }
-                product { id }
-                variant { id }
+                product { id featuredImage { url } }
+                variant { id image { url } }
               }
             }
           }
@@ -199,7 +199,13 @@ export async function syncOrders(sinceDate?: string) {
           const item = li.node
           const unitPrice = (item.originalUnitPriceSet as Record<string, Record<string, string>>).shopMoney
           const totalItemPrice = (item.originalTotalSet as Record<string, Record<string, string>>).shopMoney
-          const image = item.image as Record<string, string> | null
+          // Image fallback chain: lineItem.image → variant.image → product.featuredImage.
+          // Variant images often aren't set per size; the product's featured image is.
+          const lineImg = item.image as Record<string, string> | null
+          const variant = item.variant as { image?: { url?: string } | null } | null
+          const product = item.product as { featuredImage?: { url?: string } | null } | null
+          const imageUrl =
+            lineImg?.url || variant?.image?.url || product?.featuredImage?.url || null
           const shopifyLineItemId = extractIdFromGid(item.id as string)
           shopifyLineItemIds.add(shopifyLineItemId)
           seenIds.add(shopifyLineItemId)
@@ -213,7 +219,7 @@ export async function syncOrders(sinceDate?: string) {
             quantity: item.quantity as number,
             unit_price: parseFloat(unitPrice.amount),
             total_price: parseFloat(totalItemPrice.amount),
-            image_url: image?.url || null,
+            image_url: imageUrl,
           }
 
           const existingItem = existingMap.get(shopifyLineItemId)

@@ -227,9 +227,15 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
             <p className="font-medium">{order.customer_name as string}</p>
             {shippingAddress && (
               <>
-                <p>{shippingAddress.address1}</p>
-                <p>{shippingAddress.city} {shippingAddress.zip}</p>
-                <p dir="ltr">{shippingAddress.phone}</p>
+                {(shippingAddress.address1 || shippingAddress.address2) && (
+                  <p>
+                    {[shippingAddress.address1, shippingAddress.address2].filter(Boolean).join(' ').trim()}
+                  </p>
+                )}
+                {(shippingAddress.city || shippingAddress.zip) && (
+                  <p>{[shippingAddress.city, shippingAddress.zip].filter(Boolean).join(' ').trim()}</p>
+                )}
+                {shippingAddress.phone && <p dir="ltr">{shippingAddress.phone}</p>}
               </>
             )}
           </CardContent>
