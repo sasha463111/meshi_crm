@@ -96,15 +96,30 @@ async function fetchClarityUrlBreakdown(): Promise<{
       numOfDays: 1,
       dimension1: 'URL',
     })) as ClarityMetric[]
+    // Strip query string so /collections/bedding?fbclid=… variations roll up
+    // into the underlying page (otherwise each ad-tracking URL is its own row).
+    const stripQuery = (u: string): string => {
+      try {
+        const url = new URL(u)
+        return url.origin + url.pathname
+      } catch {
+        return u.split('?')[0]
+      }
+    }
     const top = (name: string): UrlBreakdown[] => {
       const metric = insights.find((m) => m.metricName === name)
       if (!metric?.information) return []
-      return metric.information
-        .map((row: Record<string, unknown>) => ({
-          url: String(row.URL || row.url || ''),
-          count: Number(row.subTotal || row.visitsCount || 0),
-        }))
-        .filter((r) => r.url)
+      const grouped = new Map<string, number>()
+      for (const row of metric.information) {
+        const r = row as Record<string, unknown>
+        const u = String(r.Url || r.URL || r.url || '')
+        const c = Number(r.subTotal || r.visitsCount || 0)
+        if (!u || c <= 0) continue
+        const key = stripQuery(u)
+        grouped.set(key, (grouped.get(key) || 0) + c)
+      }
+      return [...grouped.entries()]
+        .map(([url, count]) => ({ url, count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 5)
     }
