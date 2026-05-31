@@ -158,18 +158,10 @@ async function gatherData(): Promise<SummaryData> {
     }
   }
 
-  // Supplier fulfillment events today (status changes to shipped/fulfilled).
-  const { data: fulLogs } = await supabase
-    .from('order_item_status_logs')
-    .select('order_item_id, to_status')
-    .gte('created_at', startIso)
-    .in('to_status', ['shipped', 'fulfilled'])
-  const fulfilledToday = new Set((fulLogs || []).map((l) => l.order_item_id)).size
-
-  // Open queue in the supplier portal: count ORDERS (not items) whose worst-status
-  // item is still "pending" — exactly how the portal counts (an order with any
-  // cancelled item resolves to cancelled; otherwise the order's status = the
-  // lowest in [cancelled, pending, packed, shipped, delivered]).
+  // Mirror the supplier portal's per-ORDER status resolution (not per-item):
+  //  - any cancelled item → order = cancelled
+  //  - else the order's status = lowest of its items in
+  //    [cancelled, pending, packed, shipped, delivered]
   const { data: allItems } = await supabase
     .from('order_items')
     .select('order_id, internal_status')
@@ -180,16 +172,39 @@ async function gatherData(): Promise<SummaryData> {
     byOrder.set(it.order_id, s)
   }
   const PRIORITY = ['cancelled', 'pending', 'packed', 'shipped', 'delivered']
+  const orderResolved = new Map<string, string>()
   let pendingFulfillment = 0
-  for (const statuses of byOrder.values()) {
-    if (statuses.has('cancelled')) continue
-    let worst = PRIORITY.length
-    for (const s of statuses) {
-      const idx = PRIORITY.indexOf(s)
-      if (idx >= 0 && idx < worst) worst = idx
+  for (const [orderId, statuses] of byOrder.entries()) {
+    let resolved: string
+    if (statuses.has('cancelled')) resolved = 'cancelled'
+    else {
+      let worst = PRIORITY.length
+      for (const s of statuses) {
+        const idx = PRIORITY.indexOf(s)
+        if (idx >= 0 && idx < worst) worst = idx
+      }
+      resolved = PRIORITY[worst]
     }
-    if (PRIORITY[worst] === 'pending') pendingFulfillment++
+    orderResolved.set(orderId, resolved)
+    if (resolved === 'pending') pendingFulfillment++
   }
+
+  // "Shipped today" — count distinct ORDERS that had a shipping event today
+  // AND whose current resolved status is shipped/delivered (so partials don't
+  // count, matching how the portal shows it).
+  const { data: fulLogs } = await supabase
+    .from('order_item_status_logs')
+    .select('order_id, to_status')
+    .gte('created_at', startIso)
+    .in('to_status', ['shipped', 'fulfilled'])
+  const fulfilledToday = new Set(
+    (fulLogs || [])
+      .map((l) => l.order_id)
+      .filter((id) => {
+        const r = orderResolved.get(id)
+        return r === 'shipped' || r === 'delivered'
+      })
+  ).size
 
   // Clarity: fresh "yesterday" pull from the live API (with snapshot fallback).
   let clarity: ClarityRow | null = await fetchClarityYesterday()
