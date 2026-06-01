@@ -36,13 +36,22 @@ export async function POST(request: NextRequest) {
       .eq('order_id', orderId)
       .eq('supplier_id', supplierId)
 
-    // Update order
+    // Update order. When carrier is Cheetah, also store the tracking number
+    // as cheetah_ship_no so the polling cron can pull live status updates.
+    const carrierLc = (carrier || '').toLowerCase()
+    const isCheetah = carrierLc === 'cheetah' || carrierLc.includes('צ')
+    const cleanShipNo = isCheetah && trackingNumber
+      ? String(trackingNumber).replace(/\D/g, '')
+      : ''
+    const validShipNo = cleanShipNo.length >= 5 && cleanShipNo.length <= 14 ? cleanShipNo : null
+
     await supabase.from('orders').update({
       tracking_number: trackingNumber,
       carrier,
       shipped_at: new Date().toISOString(),
       fulfillment_status: 'FULFILLED',
       status: 'fulfilled',
+      ...(validShipNo ? { cheetah_ship_no: validShipNo } : {}),
     }).eq('id', orderId)
 
     // Update Shopify fulfillment

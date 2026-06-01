@@ -122,13 +122,24 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
     mutationFn: async (status: string) => {
       if (!items?.length) return
       const itemIds = items.map(i => i.id)
+      // When marking as shipped, ask the supplier for the Cheetah ship_no so
+      // the polling cron can pull live tracking. Optional — empty is fine.
+      let cheetahShipNo: string | undefined
+      if (status === 'shipped') {
+        const existing = (data?.order as { cheetah_ship_no?: string } | undefined)?.cheetah_ship_no
+        const ans = window.prompt('מספר מעקב צ׳יטה (8 ספרות, אופציונלי):', existing || '')
+        if (ans !== null) {
+          const digits = ans.replace(/\D/g, '')
+          if (digits) cheetahShipNo = digits
+        }
+      }
       const res = await fetch(`/api/suppliers/orders/${id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-supplier-token': supplier!.access_token,
         },
-        body: JSON.stringify({ itemIds, status }),
+        body: JSON.stringify({ itemIds, status, ...(cheetahShipNo ? { cheetahShipNo } : {}) }),
       })
       if (!res.ok) throw new Error('Failed to update status')
     },

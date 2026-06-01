@@ -1,0 +1,19 @@
+-- Poll Cheetah for live shipment status every 30 minutes.
+-- Calls /api/cron/cheetah-track, which iterates over orders that have a
+-- cheetah_ship_no and no delivered_msg_sent_at yet. Created via Supabase MCP.
+--
+-- SELECT cron.schedule(
+--   'cheetah-track',
+--   '*/30 * * * *',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://one-stop-shop-theta.vercel.app/api/cron/cheetah-track',
+--       headers := jsonb_build_object(
+--         'Authorization', 'Bearer ' || (SELECT value FROM public.app_settings WHERE key = 'cron_secret'),
+--         'Content-Type', 'application/json'
+--       ),
+--       body := '{}'::jsonb,
+--       timeout_milliseconds := 60000
+--     );
+--   $$
+-- );

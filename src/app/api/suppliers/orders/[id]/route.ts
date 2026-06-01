@@ -115,11 +115,20 @@ export async function POST(
   }
 
   const { id } = await params
-  const { itemIds, status } = await request.json()
+  const { itemIds, status, cheetahShipNo } = (await request.json()) as {
+    itemIds: string[]
+    status: string
+    cheetahShipNo?: string
+  }
 
   if (!itemIds?.length || !status) {
     return NextResponse.json({ error: 'itemIds and status required' }, { status: 400 })
   }
+
+  // Sanitize ship_no (Cheetah ship numbers are 8 digits, but we accept any
+  // numeric string between 5 and 14 digits to be lenient with edge cases).
+  const cleanShipNo = cheetahShipNo ? cheetahShipNo.replace(/\D/g, '') : ''
+  const validShipNo = cleanShipNo.length >= 5 && cleanShipNo.length <= 14 ? cleanShipNo : null
 
   const validStatuses = ['pending', 'packed', 'shipped', 'delivered', 'cancelled']
   if (!validStatuses.includes(status)) {
@@ -166,6 +175,15 @@ export async function POST(
 
   if (logs.length > 0) {
     await supabase.from('order_item_status_logs').insert(logs)
+  }
+
+  // Persist the Cheetah tracking number on the order when supplied (even if
+  // not every item is shipped yet — saves Moshe from re-entering it later).
+  if (validShipNo) {
+    await supabase
+      .from('orders')
+      .update({ cheetah_ship_no: validShipNo })
+      .eq('id', id)
   }
 
   // Trigger "order packed" WhatsApp ONLY when the whole order just became shipped.
