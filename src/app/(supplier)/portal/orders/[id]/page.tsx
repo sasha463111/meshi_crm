@@ -82,6 +82,8 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
     total_price: number
     image_url?: string
     internal_status?: string
+    manually_edited?: boolean
+    manually_edited_note?: string | null
   }> | undefined
 
   // Update internal status for a single item via API
@@ -350,8 +352,21 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold">{item.title}</p>
+                      <div className="flex items-start gap-2 flex-wrap">
+                        <p className="font-semibold">{item.title}</p>
+                        {item.manually_edited && (
+                          <span
+                            className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 text-[10px] font-semibold"
+                            title={item.manually_edited_note || 'נערך ידנית'}
+                          >
+                            ✏️ נערך ידנית
+                          </span>
+                        )}
+                      </div>
                       {item.variant_title && <p className="text-sm text-muted-foreground">{item.variant_title}</p>}
+                      {item.manually_edited && item.manually_edited_note && (
+                        <p className="text-xs text-amber-700 mt-0.5">{item.manually_edited_note}</p>
+                      )}
                       {item.sku && <p className="text-xs text-muted-foreground" dir="ltr">SKU: {item.sku}</p>}
                       <div className="mt-2 flex items-center gap-2 flex-wrap">
                         <Badge variant="outline">כמות: {item.quantity}</Badge>

@@ -164,11 +164,11 @@ export async function syncOrders(sinceDate?: string) {
 
         const { data: existingItems } = await supabase
           .from('order_items')
-          .select('id, shopify_line_item_id, supplier_id, internal_status')
+          .select('id, shopify_line_item_id, supplier_id, internal_status, manually_edited')
           .eq('order_id', orderId)
 
         // Map line_item_id -> best existing row (prefer one with supplier_id)
-        const existingMap = new Map<string, { id: string; supplier_id: string | null; internal_status: string | null }>()
+        const existingMap = new Map<string, { id: string; supplier_id: string | null; internal_status: string | null; manually_edited: boolean | null }>()
         const seenIds = new Set<string>()
         const duplicateIdsToDelete: string[] = []
         for (const ex of existingItems || []) {
@@ -225,6 +225,12 @@ export async function syncOrders(sinceDate?: string) {
           const existingItem = existingMap.get(shopifyLineItemId)
 
           if (existingItem) {
+            // Skip the upsert for items that were manually edited in the portal —
+            // we don't want Shopify's data to overwrite admin corrections (e.g.
+            // size variant changed for the customer after the order was placed).
+            if (existingItem.manually_edited) {
+              continue
+            }
             // Update only Shopify fields, preserve supplier_id and internal_status
             await supabase.from('order_items').update(itemData).eq('id', existingItem.id)
           } else {
