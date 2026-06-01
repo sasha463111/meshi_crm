@@ -234,6 +234,36 @@ export default function SupplierPortalPage() {
   const counts = data?.orderCounts || { pending: 0, packed: 0, shipped: 0, delivered: 0, cancelled: 0 }
   const totalOrders = data?.orders.length || 0
 
+  // Group consecutive same-customer orders so the supplier sees them framed
+  // together — match by phone (most reliable), fallback to email, then name.
+  const customerKey = (o: Order): string | null => {
+    const phone = (o.customer_phone || o.shipping_address?.phone || '').replace(/[^\d]/g, '')
+    if (phone.length >= 6) return `p:${phone.slice(-9)}`
+    if (o.customer_email) return `e:${o.customer_email.toLowerCase()}`
+    if (o.customer_name) return `n:${o.customer_name.trim().toLowerCase()}`
+    return null
+  }
+  const keyCounts = new Map<string, number>()
+  for (const o of filteredOrders) {
+    const k = customerKey(o)
+    if (k) keyCounts.set(k, (keyCounts.get(k) || 0) + 1)
+  }
+  type Group = { key: string | null; orders: Order[]; label: string }
+  const customerGroups: Group[] = []
+  const placed = new Set<string>()
+  for (const o of filteredOrders) {
+    if (placed.has(o.id)) continue
+    const k = customerKey(o)
+    if (!k || (keyCounts.get(k) || 0) < 2) {
+      customerGroups.push({ key: k, orders: [o], label: o.customer_name || '' })
+      placed.add(o.id)
+      continue
+    }
+    const sameCustomer = filteredOrders.filter((x: Order) => customerKey(x) === k && !placed.has(x.id))
+    sameCustomer.forEach((x: Order) => placed.add(x.id))
+    customerGroups.push({ key: k, orders: sameCustomer, label: o.customer_name || o.customer_phone || '' })
+  }
+
   const toggleSelect = (orderId: string) => {
     setSelectedOrders(prev => {
       const next = new Set(prev)
@@ -415,13 +445,14 @@ export default function SupplierPortalPage() {
             <span className="text-xs text-muted-foreground">בחר הכל</span>
           </div>
 
-          {filteredOrders.map((order: Order) => {
+          {customerGroups.map((group) => {
+            const renderCard = (order: Order) => {
             const orderStatus = getOrderInternalStatus(order.id)
             const isExpanded = expandedOrder === order.id
             const orderItems = data?.orderItemsMap?.get(order.id) || []
 
             return (
-              <div key={order.id} className="rounded-lg border overflow-hidden">
+              <div key={order.id} className="rounded-lg border overflow-hidden bg-background">
                 <div className={`p-4 hover:bg-muted/30 transition-colors ${selectedOrders.has(order.id) ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}>
                   <div className="flex items-start gap-3">
                     <Checkbox
@@ -512,6 +543,27 @@ export default function SupplierPortalPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )
+            }
+
+            if (group.orders.length < 2) {
+              return <div key={group.orders[0].id}>{renderCard(group.orders[0])}</div>
+            }
+            return (
+              <div
+                key={group.key || group.orders[0].id}
+                className="rounded-xl border-2 border-amber-300 bg-amber-50/40 dark:bg-amber-950/10 p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                    👤 אותו לקוח{group.label ? ` · ${group.label}` : ''} · {group.orders.length} הזמנות
+                  </span>
+                  <span className="text-[10px] text-amber-800/70 dark:text-amber-200/70">
+                    ניתן לארוז ולשלוח יחד
+                  </span>
+                </div>
+                {group.orders.map((o) => renderCard(o))}
               </div>
             )
           })}

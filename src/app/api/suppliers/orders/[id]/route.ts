@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { enqueueJob, normalizeIlPhone } from '@/lib/whatsapp/flow'
 
 // Verify supplier token and return supplier_id
 async function verifySupplier(request: NextRequest) {
@@ -167,5 +168,66 @@ export async function POST(
     await supabase.from('order_item_status_logs').insert(logs)
   }
 
-  return NextResponse.json({ success: true, updated: verifiedIds.length, logged: logs.length })
+  // Trigger "order packed" WhatsApp ONLY when the whole order just became shipped.
+  let waEnqueued = false
+  if (status === 'shipped') {
+    const { data: allItems } = await supabase
+      .from('order_items')
+      .select('internal_status')
+      .eq('order_id', id)
+    const remaining = (allItems || []).filter(
+      (i) => i.internal_status !== 'shipped' && i.internal_status !== 'delivered' && i.internal_status !== 'cancelled'
+    )
+    if (remaining.length === 0) {
+      // Look up order details for the message
+      const { data: ord } = await supabase
+        .from('orders')
+        .select('shopify_order_id, shopify_order_number, customer_name, customer_phone, shipping_address')
+        .eq('id', id)
+        .single()
+      if (ord) {
+        const ship = ord.shipping_address as Record<string, string> | null
+        const rawPhone = ord.customer_phone || ship?.phone || null
+        const phone = normalizeIlPhone(rawPhone)
+        if (phone) {
+          // Fetch template
+          const { data: tmpl } = await supabase
+            .from('whatsapp_flow_templates')
+            .select('content')
+            .eq('flow', 'order_update')
+            .eq('step', 2)
+            .single()
+          const fallback =
+            'היי {שם} 😊\nההזמנה שלך {הזמנה} ארוזה ויוצאת לדרך בקרוב 📦\nתודה,\nמשי טקסטיל'
+          const template = tmpl?.content || fallback
+          const firstName = (ord.customer_name || '').toString().trim().split(' ')[0] || ''
+          const orderNum = ord.shopify_order_number || ''
+          const content = template
+            .replace(/\{שם\}/g, firstName)
+            .replace(/\{name\}/g, firstName)
+            .replace(/\{הזמנה\}/g, orderNum)
+            .replace(/\{order\}/g, orderNum)
+            .replace(/ {2,}/g, ' ')
+            .trim()
+
+          // Use SAME dedup-key format as the polling-based shipped enqueue so
+          // both paths produce at most ONE shipped message per order.
+          const dedupKey = `ou:ship:gid://shopify/Order/${ord.shopify_order_id}`
+          await enqueueJob({
+            flow: 'order_update',
+            step: 2,
+            phone,
+            content,
+            scheduledAt: new Date(),
+            refType: 'order',
+            refId: `gid://shopify/Order/${ord.shopify_order_id}`,
+            dedupKey,
+          })
+          waEnqueued = true
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({ success: true, updated: verifiedIds.length, logged: logs.length, whatsappEnqueued: waEnqueued })
 }
