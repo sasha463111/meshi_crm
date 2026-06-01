@@ -17,6 +17,7 @@ import {
   Lightbulb,
   Upload,
   CheckSquare,
+  Target,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -39,6 +40,7 @@ const navItems = [
   { title: 'מוצרים', href: '/products', icon: Package },
   { title: 'רווחיות', href: '/profitability', icon: TrendingUp },
   { title: 'קמפיינים', href: '/campaigns', icon: Megaphone },
+  { title: 'שיווק ממומן', href: '/marketing', icon: Target },
   { title: 'Clarity', href: '/clarity', icon: MousePointerClick },
   { title: 'WhatsApp', href: '/whatsapp', icon: MessageCircle },
   { title: 'AI Hub', href: '/ai', icon: Brain },

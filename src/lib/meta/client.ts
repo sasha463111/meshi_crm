@@ -58,4 +58,66 @@ export async function getCampaignInsights(campaignId: string, datePreset = 'last
   })
 }
 
+export interface MetaAd {
+  id: string
+  name: string
+  status: string
+  effective_status: string
+  adset_id: string
+  campaign_id: string
+  creative?: {
+    id: string
+    thumbnail_url?: string
+    object_type?: string
+    image_url?: string
+  }
+}
+
+export interface MetaAdInsight {
+  date_start: string
+  date_stop: string
+  impressions: string
+  clicks: string
+  spend: string
+  cpc?: string
+  cpm?: string
+  ctr?: string
+  reach?: string
+  frequency?: string
+  actions?: { action_type: string; value: string }[]
+  action_values?: { action_type: string; value: string }[]
+}
+
+/** All ads in the account (paginated). Includes effective_status so we can filter live ads. */
+export async function getAds(): Promise<MetaAd[]> {
+  const out: MetaAd[] = []
+  let url = new URL(
+    `https://graph.facebook.com/${API_VERSION}/${META_AD_ACCOUNT_ID}/ads`
+  )
+  url.searchParams.set('access_token', META_ACCESS_TOKEN)
+  url.searchParams.set(
+    'fields',
+    'id,name,status,effective_status,adset_id,campaign_id,creative{id,thumbnail_url,image_url,object_type}'
+  )
+  url.searchParams.set('limit', '100')
+  let pageUrl: string | null = url.toString()
+  while (pageUrl) {
+    const res = await fetch(pageUrl)
+    if (!res.ok) throw new Error(`getAds error: ${await res.text()}`)
+    const json: { data: MetaAd[]; paging?: { next?: string } } = await res.json()
+    out.push(...(json.data || []))
+    pageUrl = json.paging?.next || null
+  }
+  return out
+}
+
+/** Daily insights for a single ad. */
+export async function getAdInsights(adId: string, datePreset = 'last_30d') {
+  return metaApiRequest<{ data: MetaAdInsight[] }>(`${adId}/insights`, {
+    fields: 'impressions,clicks,spend,cpc,cpm,ctr,actions,action_values,reach,frequency',
+    time_increment: '1',
+    date_preset: datePreset,
+  })
+}
+
 export { META_AD_ACCOUNT_ID }
