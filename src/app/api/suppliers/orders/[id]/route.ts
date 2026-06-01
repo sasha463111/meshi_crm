@@ -49,7 +49,58 @@ export async function GET(
     .eq('order_id', id)
     .eq('supplier_id', supplierId)
 
-  return NextResponse.json({ order, items: items || [] })
+  // Find OTHER open orders for the same customer that this supplier has items in.
+  // "open" = at least one item in a non-final status (pending / packed). Match by
+  // phone first (most reliable), then email. Lets the supplier ship together.
+  const customerPhone = order.customer_phone as string | null
+  const customerEmail = order.customer_email as string | null
+  let relatedOpenOrders: Array<{
+    id: string
+    shopify_order_number: string | null
+    order_date: string | null
+    items_count: number
+    statuses: string[]
+  }> = []
+
+  if (customerPhone || customerEmail) {
+    let q = supabase
+      .from('orders')
+      .select('id, shopify_order_number, order_date, customer_phone, customer_email')
+      .neq('id', id)
+      .order('order_date', { ascending: false })
+      .limit(30)
+    if (customerPhone) q = q.eq('customer_phone', customerPhone)
+    else if (customerEmail) q = q.eq('customer_email', customerEmail)
+    const { data: candidates } = await q
+
+    if (candidates && candidates.length > 0) {
+      const ids = candidates.map((o) => o.id)
+      const { data: openItems } = await supabase
+        .from('order_items')
+        .select('order_id, internal_status')
+        .in('order_id', ids)
+        .eq('supplier_id', supplierId)
+        .in('internal_status', ['pending', 'packed'])
+
+      const byOrder = new Map<string, string[]>()
+      for (const it of openItems || []) {
+        const arr = byOrder.get(it.order_id) || []
+        arr.push(it.internal_status || 'pending')
+        byOrder.set(it.order_id, arr)
+      }
+      relatedOpenOrders = candidates
+        .filter((o) => byOrder.has(o.id))
+        .map((o) => ({
+          id: o.id,
+          shopify_order_number: o.shopify_order_number,
+          order_date: o.order_date,
+          items_count: byOrder.get(o.id)!.length,
+          statuses: [...new Set(byOrder.get(o.id))],
+        }))
+    }
+  }
+
+  return NextResponse.json({ order, items: items || [], relatedOpenOrders })
 }
 
 // POST: update internal_status for items in this order

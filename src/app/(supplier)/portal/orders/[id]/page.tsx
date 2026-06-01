@@ -67,11 +67,22 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
         headers: { 'x-supplier-token': supplier!.access_token },
       })
       if (!res.ok) throw new Error('Failed to fetch order')
-      return res.json() as Promise<{ order: Record<string, unknown>; items: Record<string, unknown>[] }>
+      return res.json() as Promise<{
+        order: Record<string, unknown>
+        items: Record<string, unknown>[]
+        relatedOpenOrders?: Array<{
+          id: string
+          shopify_order_number: string | null
+          order_date: string | null
+          items_count: number
+          statuses: string[]
+        }>
+      }>
     },
   })
 
   const order = data?.order
+  const relatedOpenOrders = data?.relatedOpenOrders || []
   const items = data?.items as Array<{
     id: string
     title: string
@@ -179,6 +190,48 @@ export default function SupplierOrderDetailPage(props: { params: Promise<{ id: s
           {internalStatusLabels[overallStatus]}
         </span>
       </div>
+
+      {/* Related open orders for the same customer — pack & ship together */}
+      {relatedOpenOrders.length > 0 && (
+        <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-4">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl">📦</div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-blue-900">
+                ⚠️ לאותו לקוח יש עוד {relatedOpenOrders.length === 1 ? 'הזמנה פתוחה' : `${relatedOpenOrders.length} הזמנות פתוחות`} — לשלוח יחד!
+              </p>
+              <p className="text-sm text-blue-800 mt-0.5">חוסך משלוח וזמן עיבוד.</p>
+              <div className="mt-3 space-y-1.5">
+                {relatedOpenOrders.map((ro) => (
+                  <Link
+                    key={ro.id}
+                    href={`/portal/orders/${ro.id}`}
+                    className="flex items-center justify-between gap-2 bg-white rounded-md border px-3 py-2 hover:bg-blue-100 transition"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-blue-700">{ro.shopify_order_number || ro.id.slice(0, 8)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {ro.items_count} {ro.items_count === 1 ? 'פריט' : 'פריטים'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {ro.statuses.map((s) => (
+                        <span
+                          key={s}
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${internalStatusColors[s] || ''}`}
+                        >
+                          {internalStatusLabels[s] || s}
+                        </span>
+                      ))}
+                      <ArrowRight className="size-4 text-muted-foreground" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Status Update */}
       <Card className="border-2">
