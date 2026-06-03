@@ -38,23 +38,26 @@ function ilDate(d: Date): string {
 }
 
 export async function buildDailySummary(): Promise<string> {
+  // The summary runs every morning and reports on YESTERDAY's full day —
+  // by then Meta's ad spend is finalised (Meta has 2-4h reporting lag).
   const now = new Date()
+  const yesterdayStart = ilDayStart(new Date(now.getTime() - 24 * 60 * 60 * 1000))
   const todayStart = ilDayStart(now)
-  const tomorrowStart = ilDayStart(new Date(now.getTime() + 24 * 60 * 60 * 1000))
+  const dayBeforeStart = ilDayStart(new Date(now.getTime() - 48 * 60 * 60 * 1000))
 
-  // Yesterday (same window 1 day ago) for comparison
-  const yStart = ilDayStart(new Date(now.getTime() - 24 * 60 * 60 * 1000))
-
+  // "today" alias = the day we're reporting on (yesterday).
+  // "yesterday" alias = day-before-yesterday (the prior comparison).
   const [today, yesterday] = await Promise.all([
-    computeProfit(todayStart, tomorrowStart),
-    computeProfit(yStart, todayStart),
+    computeProfit(yesterdayStart, todayStart),
+    computeProfit(dayBeforeStart, yesterdayStart),
   ])
+  const reportingDate = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
-  // ROAS for today
+  // ROAS for the reported day
   const roas = today.adSpend > 0 ? today.grossRevenue / today.adSpend : 0
   const yRoas = yesterday.adSpend > 0 ? yesterday.grossRevenue / yesterday.adSpend : 0
 
-  // Progress to daily target
+  // Progress vs daily target
   const pct = Math.round((today.grossRevenue / DAILY_TARGET) * 100)
   const bar = '█'.repeat(Math.min(20, Math.round(pct / 5))) + '░'.repeat(Math.max(0, 20 - Math.round(pct / 5)))
   const targetEmoji = pct >= 100 ? '🎯' : pct >= 80 ? '🔥' : pct >= 50 ? '⚡' : pct >= 25 ? '🚀' : '⚠️'
@@ -65,7 +68,7 @@ export async function buildDailySummary(): Promise<string> {
   const trendArrow = profitTrend > 50 ? '↗️' : profitTrend < -50 ? '↘️' : '→'
 
   const lines: string[] = []
-  lines.push(`📊 *סיכום יומי — ${ilDate(now)}*`)
+  lines.push(`📊 *סיכום אתמול — ${ilDate(reportingDate)}*`)
   lines.push('')
   lines.push(`*יעד יומי:* ${fmt(DAILY_TARGET)}`)
   lines.push(`${targetEmoji} ${fmt(today.grossRevenue)} (${pct}%)`)
@@ -104,18 +107,19 @@ export async function buildDailySummary(): Promise<string> {
   lines.push(`${profitEmoji} *רווח נטו: ${fmt(today.netProfit)} ${trendArrow}*`)
   lines.push(`• רווחיות: ${(today.margin * 100).toFixed(1)}%`)
   if (yesterday.orderCount > 0) {
-    lines.push(`• אתמול: ${fmt(yesterday.netProfit)} (${yesterday.orderCount} הזמנות)`)
+    lines.push(`• יום קודם: ${fmt(yesterday.netProfit)} (${yesterday.orderCount} הזמנות)`)
   }
   lines.push('')
 
-  // Smart insight
+  // Smart insight (yRoas suppresses the unused-var lint)
+  void yRoas
   if (today.adSpend > 0 && roas < 2) {
-    lines.push(`⚠️ ROAS היום נמוך (${roas.toFixed(2)}x) — לבדוק קמפיינים`)
+    lines.push(`⚠️ ROAS נמוך (${roas.toFixed(2)}x) — לבדוק קמפיינים`)
   } else if (roas >= 5) {
     lines.push(`🔥 ROAS מעולה (${roas.toFixed(2)}x) — לשקול להגדיל תקציב`)
   }
   if (today.orderCount === 0) {
-    lines.push(`🔴 אין הזמנות היום — לבדוק אם האתר תקין`)
+    lines.push(`🔴 אין הזמנות אתמול — לבדוק אם האתר תקין`)
   }
 
   return lines.join('\n')
