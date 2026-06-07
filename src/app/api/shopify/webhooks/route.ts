@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncOrders } from '@/lib/shopify/sync-orders'
 import { cancelPendingForPhone } from '@/lib/whatsapp/flow'
+import { sendVipInviteOnce } from '@/lib/whatsapp/vip-invite'
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
@@ -49,6 +50,19 @@ export async function POST(request: NextRequest) {
             order?.billing_address?.phone
           if (phone) {
             cancelPendingForPhone(phone, 'abandoned_cart').catch(() => {})
+
+            // Fire VIP-group invite (de-duplicated per phone, ever).
+            // Delay 2 min so the order-confirmation lands first.
+            const customerName =
+              order?.customer?.first_name ||
+              order?.shipping_address?.first_name ||
+              order?.billing_address?.first_name ||
+              ''
+            setTimeout(() => {
+              sendVipInviteOnce(phone, customerName).catch((e) =>
+                console.error('VIP invite error:', e),
+              )
+            }, 2 * 60 * 1000)
           }
         } catch {
           /* ignore parse errors */
