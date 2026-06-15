@@ -1,0 +1,58 @@
+═══════════════════════════════════════════════════════════════
+🧪 E2E CART PARITY TEST — Shopify Cart API vs Expected
+═══════════════════════════════════════════════════════════════
+
+✅ 1 towel — no promo
+   ₪60 + ₪38 ship = ₪98 | (none)
+✅ 2 towels — no promo
+   ₪120 + ₪38 ship = ₪158 | (none)
+✅ 3 towels = ₪99
+   ₪99 + ₪38 ship = ₪137 | (none)
+✅ 4 towels = ₪132 (4×60×0.55)
+   ₪132 + ₪38 ship = ₪170 | (none)
+✅ 5 towels = ₪165
+   ₪165 + ₪38 ship = ₪203 | (none)
+✅ 6 towels = ₪198
+   ₪198 + ₪38 ship = ₪236 | (none)
+✅ 10 towels = ₪330
+   ₪330 + ₪38 ship = ₪368 | (none)
+✅ Bundle 8 = ₪219
+   ₪219 + ₪38 ship = ₪257 | (none)
+✅ 2× bundle = ₪438 (free ship)
+   ₪438 + ₪0 ship = ₪438 | (none)
+✅ 1 satin = ₪79
+   ₪79 + ₪38 ship = ₪117 | (none)
+✅ 2 satin = ₪158
+   ₪158 + ₪38 ship = ₪196 | (none)
+✅ 3 satin = ₪237
+   ₪237 + ₪38 ship = ₪275 | (none)
+✅ 4 satin same color = ₪239
+   ₪239 + ₪38 ship = ₪277 | (none)
+✅ 4 satin mixed colors = ₪239
+   ₪239 + ₪38 ship = ₪277 | (none)
+✅ 5 satin = ₪298.75
+   ₪298.75 + ₪38 ship = ₪336.75 | (none)
+✅ 8 satin = ₪478 (free ship)
+   ₪478 + ₪0 ship = ₪478 | (none)
+✅ Bundle + 3 towels (each promo separate)
+   ₪318 + ₪38 ship = ₪356 | (none)
+✅ 4 satin + 1 towel
+   ₪299 + ₪38 ship = ₪337 | (none)
+❌ 4 satin + 3 towels (both promos)
+   Subtotal: ₪415 (expected ₪338, delta ₪77.00)
+   Shipping: ₪0 (expected ₪0)
+   Discounts: (none)
+   Checkout: https://75snke-n1.myshopify.com/cart/c/hWNDMKNy4iw4YsEgfgDrWMjL?key=c730934cb3026a99df55619f0901284c
+✅ Below threshold gets ₪38 ship
+   ₪60 + ₪38 ship = ₪98 | (none)
+✅ 5 satin (₪298.75) = paid ship
+   ₪298.75 + ₪38 ship = ₪336.75 | (none)
+✅ 7 satin (₪418.25) = FREE ship
+   ₪418.25 + ₪0 ship = ₪418.25 | (none)
+
+═══════════════════════════════════════════════════════════════
+RESULTS: 21 pass · 1 fail · 22 total
+═══════════════════════════════════════════════════════════════
+
+❌ FAILURES:
+  - 4 satin + 3 towels (both promos): got ₪415, expected ₪338
