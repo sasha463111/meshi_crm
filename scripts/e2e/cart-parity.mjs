@@ -86,40 +86,39 @@ const tests = [
   { name: 'Bundle 8 = ₪219', lines: [{merchandiseId: ids.bundle8, quantity: 1}], expected: {subtotal: 219} },
   { name: '2× bundle = ₪438 (free ship)', lines: [{merchandiseId: ids.bundle8, quantity: 2}], expected: {subtotal: 438} },
 
-  // === Single bedsheet ===
+  // === Single bedsheet (below promo threshold) ===
   { name: '1 satin = ₪79', lines: [{merchandiseId: ids.satinWhite, quantity: 1}], expected: {subtotal: 79} },
   { name: '2 satin = ₪158', lines: [{merchandiseId: ids.satinWhite, quantity: 2}], expected: {subtotal: 158} },
-  { name: '3 satin = ₪237', lines: [{merchandiseId: ids.satinWhite, quantity: 3}], expected: {subtotal: 237} },
 
-  // === 4-for-239 satin promo (24.4% off ≥4 from bedsheets collection) ===
-  { name: '4 satin same color = ₪239', lines: [{merchandiseId: ids.satinWhite, quantity: 4}], expected: {subtotal: 239} },
-  { name: '4 satin mixed colors = ₪239', lines: [
+  // === 3-for-219 satin promo (7.595% off ≥3 from bedsheets collection) ===
+  { name: '3 satin same color = ₪219', lines: [{merchandiseId: ids.satinWhite, quantity: 3}], expected: {subtotal: 219} },
+  { name: '3 satin mixed colors = ₪219', lines: [
     {merchandiseId: ids.satinWhite, quantity: 1},
     {merchandiseId: ids.satinNavy, quantity: 1},
-    {merchandiseId: ids.satinSage, quantity: 1},
-    {merchandiseId: ids.satinRose, quantity: 1}
-  ], expected: {subtotal: 239} },
-  { name: '5 satin = ₪298.75', lines: [{merchandiseId: ids.satinWhite, quantity: 5}], expected: {subtotal: 298.75} },
-  { name: '8 satin = ₪478 (free ship)', lines: [{merchandiseId: ids.satinWhite, quantity: 8}], expected: {subtotal: 478} },
+    {merchandiseId: ids.satinSage, quantity: 1}
+  ], expected: {subtotal: 219} },
+  { name: '4 satin = ₪292', lines: [{merchandiseId: ids.satinWhite, quantity: 4}], expected: {subtotal: 292} },
+  { name: '5 satin = ₪365', lines: [{merchandiseId: ids.satinWhite, quantity: 5}], expected: {subtotal: 365} },
+  { name: '6 satin = ₪438 (free ship)', lines: [{merchandiseId: ids.satinWhite, quantity: 6}], expected: {subtotal: 438} },
 
   // === Mixed carts ===
   { name: 'Bundle + 3 towels (each promo separate)', lines: [
     {merchandiseId: ids.bundle8, quantity: 1},
     {merchandiseId: ids.towel, quantity: 3}
   ], expected: {subtotal: 219 + 99} },
-  { name: '4 satin + 1 towel', lines: [
-    {merchandiseId: ids.satinWhite, quantity: 4},
+  { name: '3 satin + 1 towel', lines: [
+    {merchandiseId: ids.satinWhite, quantity: 3},
     {merchandiseId: ids.towel, quantity: 1}
-  ], expected: {subtotal: 239 + 60} },
-  { name: '4 satin + 3 towels (both promos)', lines: [
-    {merchandiseId: ids.satinWhite, quantity: 4},
+  ], expected: {subtotal: 219 + 60} },
+  { name: '3 satin + 3 towels (both promos)', lines: [
+    {merchandiseId: ids.satinWhite, quantity: 3},
     {merchandiseId: ids.towel, quantity: 3}
-  ], expected: {subtotal: 239 + 99} },
+  ], expected: {subtotal: 219 + 99} },
 
-  // === Free shipping boundary ===
+  // === Free shipping boundary (₪399) ===
   { name: 'Below threshold gets ₪38 ship', lines: [{merchandiseId: ids.towel, quantity: 1}], expected: {subtotal: 60} },
-  { name: '5 satin (₪298.75) = paid ship', lines: [{merchandiseId: ids.satinWhite, quantity: 5}], expected: {subtotal: 298.75} },
-  { name: '7 satin (₪418.25) = FREE ship', lines: [{merchandiseId: ids.satinWhite, quantity: 7}], expected: {subtotal: 418.25} },
+  { name: '5 satin (₪365) = paid ship', lines: [{merchandiseId: ids.satinWhite, quantity: 5}], expected: {subtotal: 365} },
+  { name: '6 satin (₪438) = FREE ship', lines: [{merchandiseId: ids.satinWhite, quantity: 6}], expected: {subtotal: 438} },
 ]
 
 console.log('═══════════════════════════════════════════════════════════════')
